@@ -48,7 +48,10 @@ const PhotoGallery = () => {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Event Photo Gallery</h1>
           <p className="text-gray-600 mt-2">
-            Browse and select your favorite photos. Add them to cart to purchase clean versions.
+            Browse watermarked preview photos. Add your favorites to cart to purchase clean, high-resolution versions.
+          </p>
+          <p className="text-sm text-gray-500 mt-1">
+            💡 All photos shown are watermarked previews. Clean versions are delivered after payment.
           </p>
         </div>
         
@@ -138,7 +141,7 @@ const PhotoCard = ({ photo, viewMode, onView, onAddToCart, isInCart }) => {
     return (
       <div className="card p-4 flex items-center space-x-4">
         <img
-          src={photo.watermarkedUrl}
+          src={photo.path_to_watermark}
           alt={photo.filename}
           className="w-24 h-24 object-cover rounded-lg"
           loading="lazy"
@@ -146,9 +149,12 @@ const PhotoCard = ({ photo, viewMode, onView, onAddToCart, isInCart }) => {
         <div className="flex-1">
           <h3 className="font-medium text-gray-900 truncate">{photo.filename}</h3>
           <p className="text-sm text-gray-500">
-            Uploaded: {new Date(photo.uploadedAt).toLocaleDateString()}
+            Updated: {new Date(photo.updated).toLocaleDateString()}
           </p>
           <p className="text-lg font-semibold text-primary-600">${photo.price}</p>
+          <span className="inline-block bg-yellow-500 text-white px-2 py-1 rounded-full text-xs font-medium mt-1">
+            PREVIEW
+          </span>
         </div>
         <div className="flex items-center space-x-2">
           <button
@@ -183,7 +189,7 @@ const PhotoCard = ({ photo, viewMode, onView, onAddToCart, isInCart }) => {
     <div className="card group overflow-hidden">
       <div className="relative aspect-square overflow-hidden">
         <img
-          src={photo.watermarkedUrl}
+          src={photo.path_to_watermark}
           alt={photo.filename}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           loading="lazy"
@@ -224,12 +230,17 @@ const PhotoCard = ({ photo, viewMode, onView, onAddToCart, isInCart }) => {
         <div className="absolute top-3 right-3 bg-primary-600 text-white px-3 py-1 rounded-full text-sm font-medium">
           ${photo.price}
         </div>
+
+        {/* Watermark indicator */}
+        <div className="absolute top-3 left-3 bg-yellow-500 text-white px-2 py-1 rounded-full text-xs font-medium">
+          PREVIEW
+        </div>
       </div>
 
       <div className="p-4">
         <h3 className="font-medium text-gray-900 truncate mb-1">{photo.filename}</h3>
         <p className="text-sm text-gray-500">
-          {new Date(photo.uploadedAt).toLocaleDateString()}
+          {new Date(photo.updated).toLocaleDateString()}
         </p>
       </div>
     </div>

@@ -20,14 +20,14 @@ export const PhotoProvider = ({ children }) => {
   // Fetch photos from API
   const fetchPhotos = async () => {
     try {
-      console.log('PhotoContext: Fetching photos from /api/photos');
+      console.log('PhotoContext: Fetching watermarked photos from /api/photos/watermarked');
       setLoading(true);
-      const response = await axios.get('/api/photos');
-      console.log('PhotoContext: Photos fetched successfully:', response.data);
+      const response = await axios.get('/api/photos/watermarked');
+      console.log('PhotoContext: Watermarked photos fetched successfully:', response.data);
       setPhotos(response.data);
       setError(null);
     } catch (err) {
-      console.error('PhotoContext: Error fetching photos:', err);
+      console.error('PhotoContext: Error fetching watermarked photos:', err);
       console.error('PhotoContext: Error response:', err.response);
       setError('Failed to load photos');
     } finally {
@@ -64,11 +64,26 @@ export const PhotoProvider = ({ children }) => {
     }
   };
 
+  // Fetch clean photos by IDs (for after payment)
+  const fetchCleanPhotos = async (photoIds) => {
+    try {
+      console.log('PhotoContext: Fetching clean photos for IDs:', photoIds);
+      const idsParam = Array.isArray(photoIds) ? photoIds.join(',') : photoIds;
+      const response = await axios.get(`/api/photos/clean?ids=${idsParam}`);
+      console.log('PhotoContext: Clean photos fetched successfully:', response.data);
+      return response.data;
+    } catch (err) {
+      console.error('PhotoContext: Error fetching clean photos:', err);
+      console.error('PhotoContext: Error response:', err.response);
+      throw new Error(err.response?.data?.error || 'Failed to fetch clean photos');
+    }
+  };
+
   // Filter photos
   const filteredPhotos = photos.filter(photo => {
     if (filter === 'all') return true;
     if (filter === 'recent') {
-      const photoDate = new Date(photo.uploadedAt);
+      const photoDate = new Date(photo.updated);
       const weekAgo = new Date();
       weekAgo.setDate(weekAgo.getDate() - 7);
       return photoDate > weekAgo;
@@ -89,6 +104,7 @@ export const PhotoProvider = ({ children }) => {
     setFilter,
     fetchPhotos,
     uploadPhotos,
+    fetchCleanPhotos
   };
 
   return (

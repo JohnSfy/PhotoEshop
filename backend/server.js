@@ -7,6 +7,26 @@ const sharp = require('sharp');
 const nodemailer = require('nodemailer');
 const { v4: uuidv4 } = require('uuid');
 const Database = require('better-sqlite3');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const crypto = require('crypto');
+
+// ─────────── ENV ───────────
+// .env:
+// PORT=5000 (or keep your existing PORT)
+// ALLOWED_ORIGIN=http://localhost:3000 (or your frontend URL)
+// MYPOS_PRIVATE_KEY_PEM="-----BEGIN PRIVATE KEY-----\n..."
+// (προαιρετικά) MYPOS_PUBLIC_CERT_PEM="-----BEGIN CERTIFICATE-----\n..."  // για verify notify
+const {
+  PORT = 5000,
+  ALLOWED_ORIGIN = "http://localhost:3000",
+  MYPOS_PRIVATE_KEY_PEM,
+  MYPOS_PUBLIC_CERT_PEM, // sandbox public cert (μόνο για επαλήθευση)
+} = process.env;
+
+if (!MYPOS_PRIVATE_KEY_PEM) {
+  console.error(" Missing MYPOS_PRIVATE_KEY_PEM in env");
+  console.log(" myPOS payment functionality will be disabled");
+}
 
 // Load categories from JSON file
 const categoriesPath = path.join(__dirname, 'categories.json');
@@ -26,7 +46,7 @@ try {
 }
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+app.set("trust proxy", true);
 
 // Initialize SQLite database
 const dbPath = path.join(__dirname, 'database', 'photos.db');
@@ -45,9 +65,23 @@ db.exec(`
   )
 `);
 
+// Create orders table for payment tracking
+db.exec(`
+  CREATE TABLE IF NOT EXISTS orders (
+    id TEXT PRIMARY KEY,
+    photo_ids TEXT,
+    total_amount REAL,
+    status TEXT DEFAULT 'pending',
+    mypos_order_id TEXT,
+    created_at TEXT,
+    updated_at TEXT
+  )
+`);
+
 // Middleware
-app.use(cors());
+app.use(cors({ origin: ALLOWED_ORIGIN, credentials: false }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: false })); // For myPOS notify
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 app.use('/api', express.json());
 
@@ -850,6 +884,156 @@ app.post('/api/photos/upload', upload.fields([
   }
 });
 
+// ─────────────────────────────────────────────────────────
+// myPOS Payment Functions
+// ─────────────────────────────────────────────────────────
+
+// Βοηθητικό: φτιάχνει το canonical string που θα υπογράψουμε
+function buildCanonical(params) {
+  // 1) πετάμε το 'signature'
+  const entries = Object.entries(params).filter(([k]) => k.toLowerCase() !== "signature");
+
+  // 2) ταξινόμηση αλφαβητικά με βάση το key
+  entries.sort(([a], [b]) => a.localeCompare(b));
+
+  // 3) join ως key=value με & (χωρίς επιπλέον spaces)
+  // (αν κάποια τιμή έχει & ή = άφησέ τη raw, το myPOS SDK περιμένει raw values)
+  return entries.map(([k, v]) => `${k}=${v}`).join("&");
+}
+
+// ─────────────────────────────────────────────────────────
+// 1) Υπογραφή για Embedded Checkout
+// Frontend: POST /mypos/sign με το αντικείμενο παραμέτρων ΧΩΡΙΣ signature
+// Επιστρέφουμε { signature }
+app.post("/mypos/sign", (req, res) => {
+  try {
+    if (!MYPOS_PRIVATE_KEY_PEM) {
+      return res.status(503).json({ error: "mypos_not_configured" });
+    }
+
+    const params = req.body || {};
+    const canonical = buildCanonical(params);
+
+    const signer = crypto.createSign("RSA-SHA256");
+    signer.update(Buffer.from(canonical, "utf8"));
+    const signature = signer.sign(MYPOS_PRIVATE_KEY_PEM, "base64");
+
+    return res.json({ signature });
+  } catch (err) {
+    console.error("sign error:", err);
+    return res.status(500).json({ error: "sign_failed" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// 2) Notify URL από myPOS (ΠΡΕΠΕΙ να είναι https/public στο sandbox/live)
+// myPOS απαιτεί: απάντηση 200 με body ακριβώς "OK"
+app.post("/mypos/notify", (req, res) => {
+  try {
+    // Τα πεδία έρχονται form-url-encoded στο req.body
+    console.log(" myPOS notify payload:", req.body);
+
+    // (Προαιρετικά) verify signature του notify:
+    // Αν το payload περιέχει 'signature', φτιάχνεις canonical και επαληθεύεις:
+    if (MYPOS_PUBLIC_CERT_PEM && req.body && req.body.signature) {
+      const { signature, ...rest } = req.body;
+      const canonical = buildCanonical(rest);
+      const verifier = crypto.createVerify("RSA-SHA256");
+      verifier.update(Buffer.from(canonical, "utf8"));
+      const isValid = verifier.verify(MYPOS_PUBLIC_CERT_PEM, signature, "base64");
+      if (!isValid) {
+        console.warn(" notify signature INVALID");
+        // Δεν απαντάμε με error για να μη ξανα-χτυπάει αέναα, απλά log
+      } else {
+        console.log(" notify signature OK");
+      }
+    }
+
+    // Update order status based on myPOS response
+    if (req.body && req.body.orderId) {
+      const orderId = req.body.orderId;
+      const status = req.body.status || 'unknown';
+      
+      // Update order in database
+      const stmt = db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE mypos_order_id = ?');
+      stmt.run(status, new Date().toISOString(), orderId);
+      
+      console.log(` Order ${orderId} status updated to: ${status}`);
+    }
+
+    // Απάντηση που απαιτείται από myPOS:
+    return res.status(200).send("OK");
+  } catch (err) {
+    console.error("notify error:", err);
+    // Παρόλα αυτά προτείνεται να απαντήσεις "OK" για να μη γίνει retry storm
+    return res.status(200).send("OK");
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// 3) Create order for photos (before payment)
+app.post("/api/orders", (req, res) => {
+  try {
+    const { photoIds, totalAmount } = req.body;
+    
+    if (!photoIds || !Array.isArray(photoIds) || photoIds.length === 0) {
+      return res.status(400).json({ error: 'Photo IDs array is required' });
+    }
+    
+    if (!totalAmount || totalAmount <= 0) {
+      return res.status(400).json({ error: 'Valid total amount is required' });
+    }
+    
+    const orderId = uuidv4();
+    const currentDate = new Date().toISOString();
+    
+    // Create order in database
+    const stmt = db.prepare('INSERT INTO orders (id, photo_ids, total_amount, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
+    stmt.run(orderId, JSON.stringify(photoIds), totalAmount, 'pending', currentDate, currentDate);
+    
+    console.log(`Order created: ${orderId} for ${photoIds.length} photos, total: €${totalAmount}`);
+    
+    res.json({ 
+      orderId,
+      message: 'Order created successfully',
+      totalAmount,
+      photoCount: photoIds.length
+    });
+    
+  } catch (error) {
+    console.error('Error creating order:', error);
+    res.status(500).json({ error: 'Failed to create order' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// 4) Get order status
+app.get("/api/orders/:orderId", (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    const stmt = db.prepare('SELECT * FROM orders WHERE id = ?');
+    const order = stmt.get(orderId);
+    
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+    
+    // Parse photo IDs back to array
+    order.photo_ids = JSON.parse(order.photo_ids);
+    
+    res.json(order);
+    
+  } catch (error) {
+    console.error('Error fetching order:', error);
+    res.status(500).json({ error: 'Failed to fetch order' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// 5) Health check endpoint
+app.get("/health", (_req, res) => res.json({ ok: true }));
+
 // Serve React app in production
 if (process.env.NODE_ENV === 'production') {
   app.get('*', (req, res) => {
@@ -876,6 +1060,10 @@ app.use((error, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Photo upload directory: ${path.join(__dirname, '..', 'uploads')}`);
+  console.log(` Server running on port ${PORT}`);
+  console.log(` Photo upload directory: ${path.join(__dirname, '..', 'uploads')}`);
+  console.log(` myPOS payment endpoints: ${MYPOS_PRIVATE_KEY_PEM ? 'ENABLED' : 'DISABLED'}`);
+  console.log(` Allowed origin: ${ALLOWED_ORIGIN}`);
+  console.log(` Health check: http://localhost:${PORT}/health`);
+  console.log(` API helper: http://localhost:${PORT}/api/helper`);
 });
