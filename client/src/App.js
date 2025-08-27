@@ -4,9 +4,12 @@ import Header from './components/Header';
 import PhotoGallery from './components/PhotoGallery';
 import Cart from './components/Cart';
 import Checkout from './components/Checkout';
+import PaymentSuccess from './components/PaymentSuccess';
+import PaymentCancel from './components/PaymentCancel';
 import AdminPanel from './components/AdminPanel';
 import { CartProvider } from './context/CartContext';
 import { PhotoProvider } from './context/PhotoContext';
+import { OrderProvider } from './context/OrderContext';
 
 function App() {
   const [isAdmin, setIsAdmin] = useState(false);
@@ -23,15 +26,19 @@ function App() {
     <div className="min-h-screen bg-gray-50">
       <PhotoProvider>
         <CartProvider>
-          <Header isAdmin={isAdmin} setIsAdmin={setIsAdmin} />
-          <main className="container mx-auto px-4 py-8">
-            <Routes>
-              <Route path="/" element={<PhotoGallery />} />
-              <Route path="/cart" element={<Cart />} />
-              <Route path="/checkout" element={<Checkout />} />
-              {isAdmin && <Route path="/admin" element={<AdminPanel />} />}
-            </Routes>
-          </main>
+          <OrderProvider>
+            <Header isAdmin={isAdmin} setIsAdmin={setIsAdmin} />
+            <main className="container mx-auto px-4 py-8">
+              <Routes>
+                <Route path="/" element={<PhotoGallery />} />
+                <Route path="/cart" element={<Cart />} />
+                <Route path="/checkout" element={<Checkout />} />
+                <Route path="/payment/success" element={<PaymentSuccess />} />
+                <Route path="/payment/cancel" element={<PaymentCancel />} />
+                {isAdmin && <Route path="/admin" element={<AdminPanel />} />}
+              </Routes>
+            </main>
+          </OrderProvider>
         </CartProvider>
       </PhotoProvider>
     </div>

@@ -1,238 +1,176 @@
-# Event Photo Selling Website
+# Image Buy App - Professional Event Photo Selling Platform
 
-A professional web application for selling event photos with watermark removal after payment. Built with React, Node.js, and Stripe integration.
+A custom-built website where users can view watermarked event photos, select desired ones, pay online using myPOS, and receive clean, high-resolution versions via email after payment.
 
-## 🚀 Features
+## 🏗️ Project Structure
 
-### For Customers
-- **Browse Gallery**: View watermarked event photos in a beautiful grid layout
-- **Photo Selection**: Add photos to cart with quantity controls
-- **Secure Payment**: Credit card processing via Stripe
-- **Instant Delivery**: Clean, high-resolution photos delivered via email after payment
-- **Responsive Design**: Works perfectly on desktop, tablet, and mobile devices
+```
+IMAGE BUY APP/
+├── backend/                 # Backend server and database
+│   ├── server.js           # Express server with myPOS integration
+│   ├── database/           # SQLite database and manager
+│   │   ├── setup.js        # Database setup script
+│   │   ├── dbManager.js    # Database operations
+│   │   └── photos.db       # SQLite database file
+│   ├── package.json        # Backend dependencies
+│   └── env-template.txt    # Environment variables template
+├── client/                  # React frontend
+│   ├── src/                # Source code
+│   ├── public/             # Public assets
+│   └── package.json        # Frontend dependencies
+├── uploads/                 # Photo storage
+│   ├── clean/              # Original clean photos
+│   └── watermarked/        # Watermarked preview photos
+└── package.json             # Root project configuration
+```
 
-### For Administrators
-- **Photo Management**: Upload watermarked and clean photo pairs
-- **Gallery Control**: Manage photo prices, delete photos, view analytics
-- **Order Tracking**: Monitor sales and customer orders
-- **Bulk Upload**: Upload multiple photos simultaneously
+## 🚀 Quick Start
+
+### 1. Install Dependencies
+```bash
+npm run install:all
+```
+
+### 2. Set Up Database
+```bash
+npm run setup-db
+```
+
+### 3. Configure Environment
+Copy `backend/env-template.txt` to `backend/.env` and fill in your credentials:
+```bash
+# Server Configuration
+PORT=5000
+BASE_URL=http://localhost:5000
+
+# Email Configuration
+EMAIL_USER=your-email@gmail.com
+EMAIL_PASS=your-app-password
+
+# myPOS Configuration
+MYPOS_CLIENT_ID=your-mypos-client-id
+MYPOS_CLIENT_SECRET=your-mypos-client-secret
+MYPOS_SANDBOX=true
+```
+
+### 4. Start Development Servers
+```bash
+# Start both backend and frontend
+npm start
+
+# Or start separately:
+npm run backend      # Backend on port 5000
+npm run frontend     # Frontend on port 3000
+```
+
+## 🎯 Features
+
+### **Photo Management**
+- **Automatic Watermarking**: Photos are automatically watermarked on upload
+- **Category Organization**: Organize photos by event type (wedding, corporate, birthday, etc.)
+- **Flexible Pricing**: Set different prices per photo
+- **Professional Naming**: Structured file naming system
+
+### **Payment System**
+- **myPOS Integration**: Secure external payment processing
+- **Credit Card Support**: Professional payment gateway
+- **Webhook Handling**: Secure payment confirmation
+- **Order Tracking**: Complete order management
+
+### **User Experience**
+- **Watermarked Gallery**: Browse preview photos with clear indicators
+- **Shopping Cart**: Select and manage photo purchases
+- **Email Delivery**: Clean photos delivered automatically after payment
+- **Responsive Design**: Works on all devices
 
 ## 🛠️ Technology Stack
 
-- **Frontend**: React 18, Tailwind CSS, Lucide React Icons
-- **Backend**: Node.js, Express.js
-- **Payment**: Stripe API
-- **Email**: Nodemailer
-- **File Upload**: Multer
-- **Styling**: Tailwind CSS with custom components
+### **Backend**
+- **Node.js** with Express.js
+- **SQLite** database with better-sqlite3
+- **Sharp** for image processing and watermarking
+- **Multer** for file uploads
+- **Nodemailer** for email delivery
+- **myPOS API** for payment processing
 
-## 📋 Prerequisites
+### **Frontend**
+- **React 18** with Create React App
+- **Tailwind CSS** for styling
+- **React Router** for navigation
+- **Context API** for state management
+- **Axios** for API communication
 
-- Node.js (v16 or higher)
-- npm or yarn
-- Stripe account with API keys
-- Email service credentials (Gmail, SendGrid, etc.)
+## 📁 Database Schema
 
-## 🚀 Installation & Setup
-
-### 1. Clone the Repository
-```bash
-git clone <your-repo-url>
-cd image-buy-app
+### **Photos Table**
+```sql
+CREATE TABLE photos (
+  id TEXT PRIMARY KEY,
+  watermark_path TEXT NOT NULL,
+  clean_path TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  price REAL DEFAULT 5.99,
+  updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+  category TEXT DEFAULT 'other'
+);
 ```
 
-### 2. Install Dependencies
-```bash
-# Install backend dependencies
-npm install
+## 🔧 Development
 
-# Install frontend dependencies
+### **Backend Development**
+```bash
+cd backend
+npm run dev          # Start with nodemon
+npm run setup-db     # Recreate database
+```
+
+### **Frontend Development**
+```bash
 cd client
-npm install
-cd ..
+npm start            # Start React dev server
+npm run build        # Build for production
 ```
 
-### 3. Environment Configuration
-Create a `.env` file in the root directory:
-
-```env
-# Viva Wallet Configuration
-VIVA_WALLET_MERCHANT_ID=your_merchant_id_here
-VIVA_WALLET_API_KEY=your_api_key_here
-
-# Email Configuration
-EMAIL_USER=your_email@gmail.com
-EMAIL_PASS=your_app_password_here
-
-# Application Configuration
-BASE_URL=http://localhost:5000
-PORT=5000
-```
-
-### 4. Viva Wallet Setup
-1. Create a Viva Wallet account at [vivawallet.com](https://vivawallet.com)
-2. Get your Merchant ID and API Key from the Viva Wallet Dashboard
-3. Update the `.env` file with your credentials
-4. Configure webhook URL in Viva Wallet Dashboard to point to:
-   ```
-   https://yourdomain.com/api/viva-webhook
-   ```
-5. For testing, use Viva Wallet's test environment
-
-### 5. Email Setup
-For Gmail:
-1. Enable 2-factor authentication
-2. Generate an App Password
-3. Use the App Password in your `.env` file
-
-## 🏃‍♂️ Running the Application
-
-### Development Mode
+### **Database Operations**
 ```bash
-# Terminal 1: Start backend server
-npm run dev
-
-# Terminal 2: Start frontend development server
-cd client
-npm start
+cd backend
+npm run setup-db     # Initialize database
 ```
 
-The application will be available at:
-- **Frontend**: http://localhost:3000
-- **Backend**: http://localhost:5000
+## 📸 Photo Upload Process
 
-### Production Build
-```bash
-# Build the frontend
-cd client
-npm run build
-cd ..
-
-# Start production server
-npm start
-```
-
-## 📸 Usage Guide
-
-### For Customers
-
-1. **Browse Photos**: Visit the gallery to see watermarked event photos
-2. **Select Photos**: Click on photos to view details or add to cart
-3. **Manage Cart**: Review selected photos and adjust quantities
-4. **Checkout**: Enter payment information and complete purchase
-5. **Receive Photos**: Clean photos will be emailed automatically
-
-### For Administrators
-
-1. **Access Admin Panel**: Click the "Admin" button and enter the admin key
-2. **Upload Photos**: Use the upload form to add watermarked and clean photo pairs
-3. **Manage Gallery**: View, organize, and delete photos as needed
-4. **Monitor Sales**: Track orders and revenue in the analytics section
-
-**Default Admin Key**: `your-secret-admin-key` (change this in production!)
-
-## 🔧 Configuration Options
-
-### Photo Pricing
-Edit the default price in `server.js`:
-```javascript
-price: 5.99, // Default price per photo
-```
-
-### Email Templates
-Customize email content in the `sendCleanPhotosEmail` function in `server.js`.
-
-### File Upload Limits
-Adjust file size limits in `server.js`:
-```javascript
-limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
-```
-
-## 🚀 Deployment
-
-### Heroku
-1. Create a Heroku app
-2. Set environment variables in Heroku dashboard
-3. Deploy using the included `heroku-postbuild` script
-
-### Vercel/Netlify
-1. Build the frontend: `cd client && npm run build`
-2. Deploy the `build` folder
-3. Deploy the backend separately (Railway, Render, etc.)
-
-### Environment Variables for Production
-```env
-STRIPE_SECRET_KEY=sk_live_your_live_stripe_key
-STRIPE_PUBLISHABLE_KEY=pk_live_your_live_stripe_key
-EMAIL_USER=your_production_email
-EMAIL_PASS=your_production_email_password
-BASE_URL=https://yourdomain.com
-```
+1. **Admin Upload**: Upload clean photos through admin panel
+2. **Automatic Processing**: 
+   - Photos are saved with structured naming
+   - Watermarked versions are automatically created
+   - Database records are created
+3. **Gallery Display**: Watermarked photos shown to customers
+4. **Purchase Flow**: Customers select and pay for photos
+5. **Delivery**: Clean photos sent via email after payment
 
 ## 🔒 Security Features
 
-- **Input Validation**: Server-side validation for all inputs
-- **File Type Restrictions**: Only image files allowed
-- **Secure File Names**: Unique, timestamped filenames
-- **Payment Verification**: Stripe payment intent verification
-- **Admin Authentication**: Simple admin key system (enhance for production)
+- **Watermarked Previews**: Only preview versions visible to customers
+- **Secure Payment**: External myPOS processing
+- **Webhook Verification**: Payment confirmation security
+- **File Access Control**: Clean photos only accessible after payment
 
-## 📱 Responsive Design
+## 🚀 Production Deployment
 
-The application is fully responsive and works on:
-- Desktop computers
-- Tablets
-- Mobile phones
-- All modern browsers
+### **Environment Variables**
+Ensure all required environment variables are set in production:
+- myPOS credentials
+- Email service credentials
+- Base URL configuration
 
-## 🧪 Testing
+### **File Storage**
+- Ensure `uploads/` directory is properly configured
+- Set appropriate file permissions
+- Consider cloud storage for production
 
-### Test Credit Cards (Stripe Test Mode)
-- **Success**: 4242 4242 4242 4242
-- **Declined**: 4000 0000 0000 0002
-- **Requires Authentication**: 4000 0025 0000 3155
+## 📞 Support
 
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **Photos not loading**: Check file permissions in `uploads/` directory
-2. **Payment errors**: Verify Stripe API keys and test mode
-3. **Email not sending**: Check email credentials and app passwords
-4. **Upload failures**: Ensure file sizes are within limits
-
-### Debug Mode
-Enable detailed logging by setting `NODE_ENV=development` in your environment.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🆘 Support
-
-For support and questions:
-1. Check the troubleshooting section
-2. Review Stripe and email service documentation
-3. Open an issue on GitHub
-
-## 🔮 Future Enhancements
-
-- **Database Integration**: Replace in-memory storage with PostgreSQL/MongoDB
-- **User Accounts**: Customer registration and login system
-- **Photo Categories**: Organize photos by event type
-- **Bulk Discounts**: Volume pricing for multiple photos
-- **Social Sharing**: Share purchased photos on social media
-- **Advanced Analytics**: Detailed sales and customer insights
-- **Multi-language Support**: Internationalization
-- **Mobile App**: React Native companion app
+For technical support or questions about the platform, please contact the development team.
 
 ---
 

@@ -1,20 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
-import { ArrowLeft, CreditCard, Mail, User, CheckCircle, AlertCircle, ExternalLink, Clock } from 'lucide-react';
-import axios from 'axios';
+import { useOrder } from '../context/OrderContext';
+import { ArrowLeft, CreditCard, Mail, User, CheckCircle, AlertCircle, ExternalLink, Clock, Loader2 } from 'lucide-react';
 
 const Checkout = () => {
   const navigate = useNavigate();
   const { cartItems, cartTotal, clearCart } = useCart();
+  const { 
+    createOrder, 
+    processPayment, 
+    currentOrder, 
+    isProcessing, 
+    paymentError, 
+    paymentSuccess,
+    clearPaymentError,
+    clearCurrentOrder
+  } = useOrder();
   
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerName, setCustomerName] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [paymentError, setPaymentError] = useState('');
-  const [orderId, setOrderId] = useState(null);
-  const [orderStatus, setOrderStatus] = useState('pending');
-  const [checkoutUrl, setCheckoutUrl] = useState('');
+  const [orderStep, setOrderStep] = useState('form'); // 'form', 'processing', 'redirecting'
 
   // Redirect if cart is empty
   useEffect(() => {
@@ -23,118 +29,117 @@ const Checkout = () => {
     }
   }, [cartItems, navigate]);
 
-  // Poll order status if order is created
+  // Handle payment success
   useEffect(() => {
-    if (!orderId) return;
-
-    const checkStatus = async () => {
-      try {
-        const response = await axios.get(`/api/order-status/${orderId}`);
-        const { status } = response.data;
-        
-        if (status === 'completed') {
-          setOrderStatus('completed');
-          clearCart();
-          // Stop polling
-          return;
-        } else if (status === 'failed') {
-          setOrderStatus('failed');
-          setPaymentError('Payment failed. Please try again.');
-          // Stop polling
-          return;
-        }
-        
-        // Continue polling if still pending
-        setTimeout(checkStatus, 3000);
-      } catch (error) {
-        console.error('Error checking order status:', error);
-      }
-    };
-
-    // Start polling after 5 seconds
-    const timer = setTimeout(checkStatus, 5000);
-    return () => clearTimeout(timer);
-  }, [orderId, clearCart]);
-
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-
-    if (!customerEmail || !customerName) {
-      setPaymentError('Please fill in all required fields');
-      return;
+    if (paymentSuccess && currentOrder) {
+      setOrderStep('redirecting');
+      // The myPOS service will handle the redirect
     }
+  }, [paymentSuccess, currentOrder]);
 
-    setIsProcessing(true);
-    setPaymentError('');
+  // Handle payment errors
+  useEffect(() => {
+    if (paymentError) {
+      setOrderStep('form');
+    }
+  }, [paymentError]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setOrderStep('processing');
+    clearPaymentError();
 
     try {
-      // Create checkout session
-      const { data } = await axios.post('/api/create-checkout', {
-        photoIds: cartItems.map(item => item.id),
-        customerEmail,
-        customerName
-      });
+      // Step 1: Create order in our database
+      const order = await createOrder(
+        cartItems.map(item => item.id),
+        cartTotal,
+        {
+          name: customerName,
+          email: customerEmail,
+          photoCount: cartItems.length
+        }
+      );
 
-      setOrderId(data.orderId);
-      setCheckoutUrl(data.checkoutUrl);
-      
-      // Redirect to Viva Wallet
-      window.location.href = data.checkoutUrl;
+      // Step 2: Process payment with myPOS
+      await processPayment(
+        order.orderId,
+        cartTotal,
+        {
+          name: customerName,
+          email: customerEmail,
+          photoIds: cartItems.map(item => item.id),
+          photoCount: cartItems.length
+        }
+      );
+
+      // Step 3: Clear cart and redirect to payment
+      clearCart();
       
     } catch (error) {
-      setPaymentError(error.response?.data?.error || 'Failed to create checkout. Please try again.');
-    } finally {
-      setIsProcessing(false);
+      console.error('Checkout error:', error);
+      setOrderStep('form');
     }
   };
 
-  if (orderStatus === 'completed') {
+  // Handle form input changes
+  const handleInputChange = (field, value) => {
+    if (field === 'email') {
+      setCustomerEmail(value);
+    } else if (field === 'name') {
+      setCustomerName(value);
+    }
+  };
+
+  // Reset checkout process
+  const resetCheckout = () => {
+    setOrderStep('form');
+    clearPaymentError();
+    clearCurrentOrder();
+  };
+
+  // Show processing state
+  if (orderStep === 'processing') {
     return (
       <div className="max-w-2xl mx-auto text-center py-16">
-        <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-6" />
-        <h1 className="text-3xl font-bold text-gray-900 mb-4">Payment Successful! 🎉</h1>
+        <Loader2 className="h-16 w-16 text-blue-500 mx-auto mb-6 animate-spin" />
+        <h1 className="text-3xl font-bold text-gray-900 mb-4">Processing Your Order</h1>
         <p className="text-lg text-gray-600 mb-6">
-          Thank you for your purchase! Your clean photos have been sent to your email.
+          Please wait while we create your order and prepare payment...
         </p>
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-          <p className="text-green-800">
-            <strong>Email:</strong> {customerEmail}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <p className="text-blue-800">
+            <strong>Order Details:</strong>
           </p>
-          <p className="text-green-800">
-            <strong>Photos purchased:</strong> {cartItems.length}
-          </p>
-          <p className="text-green-800">
-            <strong>Total amount:</strong> ${cartTotal.toFixed(2)}
-          </p>
+          <p className="text-blue-800">Photos: {cartItems.length}</p>
+          <p className="text-blue-800">Total: €{cartTotal.toFixed(2)}</p>
         </div>
-        <button
-          onClick={() => navigate('/')}
-          className="btn-primary"
-        >
-          Return to Gallery
-        </button>
       </div>
     );
   }
 
-  if (orderStatus === 'failed') {
+  // Show redirecting state
+  if (orderStep === 'redirecting') {
     return (
       <div className="max-w-2xl mx-auto text-center py-16">
-        <AlertCircle className="h-16 w-16 text-red-500 mx-auto mb-6" />
-        <h1 className="text-3xl font-bold text-gray-900 mb-4">Payment Failed</h1>
+        <ExternalLink className="h-16 w-16 text-green-500 mx-auto mb-6" />
+        <h1 className="text-3xl font-bold text-gray-900 mb-4">Redirecting to Payment</h1>
         <p className="text-lg text-gray-600 mb-6">
-          Your payment was not completed. Please try again.
+          You will be redirected to myPOS secure payment page in a moment...
         </p>
-        <button
-          onClick={() => {
-            setOrderStatus('pending');
-            setOrderId(null);
-            setCheckoutUrl('');
-          }}
-          className="btn-primary"
-        >
-          Try Again
-        </button>
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+          <p className="text-green-800">
+            <strong>Order ID:</strong> {currentOrder?.orderId}
+          </p>
+          <p className="text-green-800">
+            <strong>Amount:</strong> €{cartTotal.toFixed(2)}
+          </p>
+        </div>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <p className="text-blue-800 text-sm">
+            If you are not redirected automatically, please wait a moment or contact support.
+          </p>
+        </div>
       </div>
     );
   }
@@ -172,10 +177,11 @@ const Checkout = () => {
                   <input
                     type="text"
                     value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
+                    onChange={(e) => handleInputChange('name', e.target.value)}
                     className="input-field"
                     placeholder="Enter your full name"
                     required
+                    disabled={isProcessing}
                   />
                 </div>
 
@@ -187,10 +193,11 @@ const Checkout = () => {
                   <input
                     type="email"
                     value={customerEmail}
-                    onChange={(e) => setCustomerEmail(e.target.value)}
+                    onChange={(e) => handleInputChange('email', e.target.value)}
                     className="input-field"
                     placeholder="Enter your email address"
                     required
+                    disabled={isProcessing}
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     Clean photos will be sent to this email address
@@ -203,40 +210,54 @@ const Checkout = () => {
                 <div className="flex items-center space-x-2 text-red-600 bg-red-50 p-3 rounded-lg">
                   <AlertCircle className="h-5 w-5" />
                   <span>{paymentError}</span>
+                  <button
+                    type="button"
+                    onClick={clearPaymentError}
+                    className="ml-auto text-red-400 hover:text-red-600"
+                  >
+                    ×
+                  </button>
                 </div>
               )}
 
               {/* Submit Button */}
               <button
                 type="submit"
-                disabled={isProcessing}
+                disabled={isProcessing || !customerName.trim() || !customerEmail.trim()}
                 className="w-full btn-primary py-3 text-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isProcessing ? 'Creating Checkout...' : `Proceed to Payment - $${cartTotal.toFixed(2)}`}
+                {isProcessing ? (
+                  <div className="flex items-center justify-center space-x-2">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span>Processing...</span>
+                  </div>
+                ) : (
+                  `Proceed to Payment - €${cartTotal.toFixed(2)}`
+                )}
               </button>
             </form>
           </div>
 
-          {/* Viva Wallet Notice */}
+          {/* myPOS Information */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <div className="flex items-start space-x-3">
-              <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
+              <CreditCard className="h-5 w-5 text-blue-500 mt-0.5 flex-shrink-0" />
               <div className="text-sm text-blue-800">
-                <p className="font-medium mb-1">Secure External Payment</p>
-                <p>You'll be redirected to Viva Wallet's secure checkout page for payment. Your payment information is never stored on our servers.</p>
+                <p className="font-medium mb-1">Secure myPOS Payment</p>
+                <p>You'll be redirected to myPOS's secure checkout page for payment. Your payment information is never stored on our servers.</p>
               </div>
             </div>
           </div>
 
-          {/* Order Status */}
-          {orderId && (
+          {/* Order Information */}
+          {currentOrder && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div className="flex items-center space-x-3">
                 <Clock className="h-5 w-5 text-yellow-600" />
                 <div className="text-sm text-yellow-800">
                   <p className="font-medium mb-1">Order Created</p>
-                  <p>Order ID: {orderId}</p>
-                  <p>Redirecting to Viva Wallet...</p>
+                  <p>Order ID: {currentOrder.orderId}</p>
+                  <p>Status: {currentOrder.status}</p>
                 </div>
               </div>
             </div>
@@ -251,7 +272,7 @@ const Checkout = () => {
             <div className="space-y-3 mb-6">
               <div className="flex justify-between text-sm text-gray-600">
                 <span>Photos ({cartItems.length})</span>
-                <span>${cartTotal.toFixed(2)}</span>
+                <span>€{cartTotal.toFixed(2)}</span>
               </div>
               
               <div className="flex justify-between text-sm text-gray-600">
@@ -262,7 +283,7 @@ const Checkout = () => {
               <div className="border-t border-gray-200 pt-3">
                 <div className="flex justify-between font-semibold text-lg">
                   <span>Total</span>
-                  <span className="text-primary-600">${cartTotal.toFixed(2)}</span>
+                  <span className="text-primary-600">€{cartTotal.toFixed(2)}</span>
                 </div>
               </div>
             </div>
@@ -275,7 +296,7 @@ const Checkout = () => {
               {cartItems.map((item) => (
                 <div key={item.id} className="flex items-center space-x-3">
                   <img
-                    src={item.watermarkedUrl}
+                    src={item.path_to_watermark}
                     alt={item.filename}
                     className="w-12 h-12 object-cover rounded-lg"
                   />
@@ -284,11 +305,11 @@ const Checkout = () => {
                       {item.filename}
                     </p>
                     <p className="text-xs text-gray-500">
-                      Qty: {item.quantity} × ${item.price}
+                      Qty: {item.quantity} × €{item.price}
                     </p>
                   </div>
                   <span className="text-sm font-medium text-gray-900">
-                    ${(item.price * item.quantity).toFixed(2)}
+                    €{(item.price * item.quantity).toFixed(2)}
                   </span>
                 </div>
               ))}

@@ -33,9 +33,9 @@ const PhotoModal = ({ photo, onClose, onAddToCart, isInCart }) => {
           <div className="flex-1 p-4">
             <div className="relative">
               <img
-                src={photo.watermarkedUrl}
+                src={photo.path_to_watermark}
                 alt={photo.filename}
-                className="w-full h-auto max-h-[60vh] object-contain rounded-lg"
+                className="w-full h-full object-cover rounded-lg"
               />
               
               {/* Watermark notice */}
@@ -54,7 +54,7 @@ const PhotoModal = ({ photo, onClose, onAddToCart, isInCart }) => {
               <div className="flex items-center space-x-3 text-sm text-gray-600">
                 <Calendar className="h-4 w-4" />
                 <span>
-                  Uploaded: {new Date(photo.uploadedAt).toLocaleDateString()}
+                  Uploaded: {new Date(photo.updated).toLocaleDateString()}
                 </span>
               </div>
               
@@ -109,7 +109,7 @@ const PhotoModal = ({ photo, onClose, onAddToCart, isInCart }) => {
               <button
                 onClick={() => {
                   const link = document.createElement('a');
-                  link.href = photo.watermarkedUrl;
+                  link.href = photo.path_to_watermark;
                   link.download = photo.filename;
                   link.click();
                 }}
