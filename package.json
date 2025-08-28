@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Professional event photo selling platform with watermark removal after payment",
   "main": "index.js",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "start": "concurrently \"npm run backend\" \"npm run frontend\"",
     "backend": "cd backend && npm run dev",
