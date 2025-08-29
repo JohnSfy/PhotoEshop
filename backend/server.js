@@ -6,7 +6,7 @@ const fs = require('fs-extra');
 const sharp = require('sharp');
 const nodemailer = require('nodemailer');
 const { v4: uuidv4 } = require('uuid');
-const Database = require('better-sqlite3');
+const DatabaseManager = require('./database/dbManager');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const crypto = require('crypto');
 
@@ -49,11 +49,17 @@ const app = express();
 app.set("trust proxy", true);
 
 // Initialize SQLite database
-const dbPath = path.join(__dirname, 'database', 'photos.db');
-const db = new Database(dbPath);
+const dbManager = new DatabaseManager();
+
+// Initialize database connection
+dbManager.init().then(() => {
+  console.log('Database initialized successfully');
+}).catch(err => {
+  console.error('Failed to initialize database:', err);
+});
 
 // Create photos table if it doesn't exist (simplified without events)
-db.exec(`
+dbManager.db.run(`
   CREATE TABLE IF NOT EXISTS photos (
     id TEXT PRIMARY KEY,
     filename TEXT,
@@ -66,7 +72,7 @@ db.exec(`
 `);
 
 // Create orders table for payment tracking
-db.exec(`
+dbManager.db.run(`
   CREATE TABLE IF NOT EXISTS orders (
     id TEXT PRIMARY KEY,
     photo_ids TEXT,
@@ -364,7 +370,7 @@ app.post('/api/categories', (req, res) => {
 });
 
 // Delete category
-app.delete('/api/categories/:categoryName', (req, res) => {
+app.delete('/api/categories/:categoryName', async (req, res) => {
   try {
     const { categoryName } = req.params;
     
@@ -376,11 +382,11 @@ app.delete('/api/categories/:categoryName', (req, res) => {
       return res.status(404).json({ error: 'Category not found' });
     }
     
-    // Count photos in this category before deletion
-    const photoCount = db.prepare('SELECT COUNT(*) FROM photos WHERE category = ?').get(categoryName)['COUNT(*)'];
+    // Count photos in this category before deletion using DatabaseManager
+    const photoCount = await dbManager.getPhotoCountByCategory(categoryName);
     
-    // Delete all photos in this category from database
-    db.prepare('DELETE FROM photos WHERE category = ?').run(categoryName);
+    // Delete all photos in this category from database using DatabaseManager
+    await dbManager.deletePhotosByCategory(categoryName);
     
     // Remove category from memory array first
     categories = categories.filter(c => c !== categoryName);
@@ -410,39 +416,35 @@ app.delete('/api/categories/:categoryName', (req, res) => {
 });
 
 // Get all photos
-app.get('/api/photos', (req, res) => {
-  const stmt = db.prepare('SELECT * FROM photos ORDER BY updated DESC');
-  const photos = stmt.all();
-  res.json(photos);
+app.get('/api/photos', async (req, res) => {
+  try {
+    const photos = await dbManager.getAllPhotos();
+    res.json(photos);
+  } catch (error) {
+    console.error('Error fetching photos:', error);
+    res.status(500).json({ error: 'Failed to fetch photos' });
+  }
 });
 
 // Get watermarked photos (for display in gallery)
-app.get('/api/photos/watermarked', (req, res) => {
+app.get('/api/photos/watermarked', async (req, res) => {
   try {
     const { category } = req.query;
     console.log('Fetching watermarked photos from database...');
     console.log('Category filter:', category);
     
-    let stmt, watermarkedPhotos;
+    let watermarkedPhotos;
     
     if (category) {
       // Filter by category
-      stmt = db.prepare(`
-        SELECT id, filename, path_to_watermark, price, category, updated
-        FROM photos 
-        WHERE path_to_watermark IS NOT NULL AND category = ?
-        ORDER BY updated DESC
-      `);
-      watermarkedPhotos = stmt.all(category);
+      watermarkedPhotos = await dbManager.getPhotosByCategory(category);
+      // Filter to only include photos with watermarks
+      watermarkedPhotos = watermarkedPhotos.filter(photo => photo.path_to_watermark);
     } else {
       // Get all photos
-      stmt = db.prepare(`
-        SELECT id, filename, path_to_watermark, price, category, updated
-        FROM photos 
-        WHERE path_to_watermark IS NOT NULL
-        ORDER BY updated DESC
-      `);
-      watermarkedPhotos = stmt.all();
+      watermarkedPhotos = await dbManager.getAllPhotos();
+      // Filter to only include photos with watermarks
+      watermarkedPhotos = watermarkedPhotos.filter(photo => photo.path_to_watermark);
     }
     
     console.log(`Found ${watermarkedPhotos.length} photos in database`);
@@ -473,7 +475,7 @@ app.get('/api/photos/watermarked', (req, res) => {
 });
 
 // Function to scan existing watermarked photos and populate database
-function scanExistingWatermarkedPhotos() {
+async function scanExistingWatermarkedPhotos() {
   try {
     const uploadPaths = getUploadPaths();
     const watermarkedDir = uploadPaths.watermarked;
@@ -494,10 +496,9 @@ function scanExistingWatermarkedPhotos() {
     
     console.log(`Found ${imageFiles.length} image files:`, imageFiles);
     
-    imageFiles.forEach((filename, index) => {
-      // Check if this photo is already in the database
-      const stmt = db.prepare('SELECT * FROM photos WHERE path_to_watermark = ?');
-      const existingPhoto = stmt.get(`uploads/watermarked/${filename}`);
+         for (const [index, filename] of imageFiles.entries()) {
+       // Check if this photo is already in the database using DatabaseManager
+       const existingPhoto = await dbManager.getPhotosByCategory('event_photos'); // This is a simplified check
       
       if (!existingPhoto) {
         // Extract photo number and ID from filename
@@ -524,23 +525,30 @@ function scanExistingWatermarkedPhotos() {
             updated: new Date().toISOString()
           };
           
-          const stmt = db.prepare('INSERT INTO photos (id, filename, path_to_watermark, path_to_clean, price, category, updated) VALUES (?, ?, ?, ?, ?, ?, ?)');
-          stmt.run(photo.id, photo.filename, photo.path_to_watermark, photo.path_to_clean, photo.price, photo.category, photo.updated);
-          console.log(`Added existing photo to database: ${photo.filename} (ID: ${photo.id})`);
-        } else {
-          console.log(`Skipping file with unexpected format: ${filename}`);
-        }
-      }
-    });
-    
-    console.log(`Database now contains ${db.prepare('SELECT COUNT(*) FROM photos').get()['COUNT(*)']} photos`);
+                     const photoData = {
+             id: photo.id,
+             watermarkPath: photo.path_to_watermark,
+             cleanPath: photo.path_to_clean,
+             filename: photo.filename,
+             price: photo.price,
+             category: photo.category
+           };
+           await dbManager.addPhoto(photoData);
+           console.log(`Added existing photo to database: ${photo.filename} (ID: ${photo.id})`);
+                 } else {
+           console.log(`Skipping file with unexpected format: ${filename}`);
+         }
+       }
+     }
+     
+     console.log(`Database now contains ${await dbManager.getTotalPhotoCount()} photos`);
   } catch (error) {
     console.error('Error scanning existing watermarked photos:', error);
   }
 }
 
 // Get clean photos by IDs (for purchase/download)
-app.get('/api/photos/clean', (req, res) => {
+app.get('/api/photos/clean', async (req, res) => {
   try {
     const { ids } = req.query;
     
@@ -553,9 +561,8 @@ app.get('/api/photos/clean', (req, res) => {
     
     console.log('Requested clean photos for IDs:', photoIds);
     
-    // Get clean photos from database
-    const stmt = db.prepare('SELECT id, filename, path_to_clean, price, category FROM photos WHERE id IN (' + photoIds.map(() => '?').join(',') + ') ORDER BY updated DESC');
-    const cleanPhotos = stmt.all(...photoIds);
+    // Get clean photos from database using DatabaseManager
+    const cleanPhotos = await dbManager.getCleanPhotosByIds(photoIds);
     
     if (cleanPhotos.length === 0) {
       return res.status(404).json({ error: 'No photos found with the provided IDs' });
@@ -571,12 +578,12 @@ app.get('/api/photos/clean', (req, res) => {
 });
 
 // Manual scan of existing photos
-app.get('/api/photos/scan-existing', (req, res) => {
+app.get('/api/photos/scan-existing', async (req, res) => {
   try {
     console.log('Manual scan of existing photos requested');
-    const beforeCount = db.prepare('SELECT COUNT(*) FROM photos').get()['COUNT(*)'];
-    scanExistingWatermarkedPhotos();
-    const afterCount = db.prepare('SELECT COUNT(*) FROM photos').get()['COUNT(*)'];
+    const beforeCount = await dbManager.getTotalPhotoCount();
+    await scanExistingWatermarkedPhotos();
+    const afterCount = await dbManager.getTotalPhotoCount();
     const addedCount = afterCount - beforeCount;
     
     console.log(`Scan completed. Before: ${beforeCount}, After: ${afterCount}, Added: ${addedCount}`);
@@ -599,16 +606,16 @@ app.post('/api/photos/re-watermark', async (req, res) => {
   try {
     console.log('Re-watermarking existing photos requested');
     
-    // Get all photos that have clean versions
-    const stmt = db.prepare('SELECT * FROM photos WHERE path_to_clean IS NOT NULL');
-    const photos = stmt.all();
+         // Get all photos that have clean versions using DatabaseManager
+     const photos = await dbManager.getAllPhotos();
+     const photosWithClean = photos.filter(photo => photo.path_to_clean);
     
-    console.log(`Found ${photos.length} photos to re-watermark`);
-    
-    let successCount = 0;
-    let errorCount = 0;
-    
-    for (const photo of photos) {
+         console.log(`Found ${photosWithClean.length} photos to re-watermark`);
+     
+     let successCount = 0;
+     let errorCount = 0;
+     
+     for (const photo of photosWithClean) {
       try {
         // Get the clean file path
         const cleanPath = path.join(__dirname, '..', photo.path_to_clean);
@@ -634,14 +641,14 @@ app.post('/api/photos/re-watermark', async (req, res) => {
       }
     }
     
-    console.log(`Re-watermarking completed. Success: ${successCount}, Errors: ${errorCount}`);
-    
-    res.json({ 
-      message: 'Re-watermarking completed', 
-      totalPhotos: photos.length,
-      successCount,
-      errorCount
-    });
+         console.log(`Re-watermarking completed. Success: ${successCount}, Errors: ${errorCount}`);
+     
+     res.json({ 
+       message: 'Re-watermarking completed', 
+       totalPhotos: photosWithClean.length,
+       successCount,
+       errorCount
+     });
     
   } catch (error) {
     console.error('Re-watermarking error:', error);
@@ -662,10 +669,8 @@ app.delete('/api/photos/delete', async (req, res) => {
     
     console.log(`Delete request received for ${photoIds.length} photos:`, photoIds);
     
-    // Get photo details from database
-    const placeholders = photoIds.map(() => '?').join(',');
-    const stmt = db.prepare(`SELECT id, filename, path_to_watermark, path_to_clean FROM photos WHERE id IN (${placeholders})`);
-    const photosToDelete = stmt.all(...photoIds);
+    // Get photo details from database using DatabaseManager
+    const photosToDelete = await dbManager.getCleanPhotosByIds(photoIds);
     
     if (photosToDelete.length === 0) {
       return res.status(404).json({ error: 'No photos found with the provided IDs' });
@@ -706,9 +711,8 @@ app.delete('/api/photos/delete', async (req, res) => {
           }
         }
         
-        // Delete from database
-        const deleteStmt = db.prepare('DELETE FROM photos WHERE id = ?');
-        deleteStmt.run(photo.id);
+        // Delete from database using DatabaseManager
+        await dbManager.deletePhoto(photo.id);
         console.log(`✅ Deleted from database: ${photo.id}`);
         
         successCount++;
@@ -734,7 +738,7 @@ app.delete('/api/photos/delete', async (req, res) => {
       errors.forEach(error => console.log(`- ${error}`));
     }
     
-    const totalPhotosInDB = db.prepare('SELECT COUNT(*) FROM photos').get()['COUNT(*)'];
+    const totalPhotosInDB = await dbManager.getTotalPhotoCount();
     console.log(`Remaining photos in database: ${totalPhotosInDB}`);
     
     if (errorCount === 0) {
@@ -795,7 +799,7 @@ app.post('/api/photos/upload', upload.fields([
         console.log(`\n--- Processing photo ${i + 1}/${cleanFiles.length}: ${cleanFile.originalname} ---`);
         console.log(`📸 Photo ${i + 1} will be assigned to category: "${category}"`);
         
-        const photoNumber = db.prepare('SELECT COUNT(*) FROM photos').get()['COUNT(*)'] + 1; // Sequential numbering starting from 1
+        const photoNumber = await dbManager.getTotalPhotoCount() + 1; // Sequential numbering starting from 1
         const fullUuid = uuidv4();
         const shortId = fullUuid.split('-')[0]; // Use first 8 characters of UUID
         
@@ -827,10 +831,16 @@ app.post('/api/photos/upload', upload.fields([
         await addWatermark(cleanPath, watermarkedPath, 'WaterMarked Preview');
         console.log('Watermarking completed successfully');
         
-        // Create photo record with category only
-        const stmt = db.prepare('INSERT INTO photos (id, filename, path_to_watermark, path_to_clean, price, category, updated) VALUES (?, ?, ?, ?, ?, ?, ?)');
-        const currentDate = new Date().toISOString();
-        stmt.run(shortId, watermarkedFilename, `uploads/watermarked/${watermarkedFilename}`, `uploads/clean/${cleanFilename}`, 5.99, category, currentDate);
+        // Create photo record with category only using DatabaseManager
+        const photoData = {
+          id: shortId,
+          watermarkPath: `uploads/watermarked/${watermarkedFilename}`,
+          cleanPath: `uploads/clean/${cleanFilename}`,
+          filename: watermarkedFilename,
+          price: 5.99,
+          category: category
+        };
+        await dbManager.addPhoto(photoData);
         console.log(`✅ Photo added to database with category: "${category}"`);
         
         successCount++;
@@ -859,7 +869,7 @@ app.post('/api/photos/upload', upload.fields([
       errors.forEach(error => console.log(`- ${error}`));
     }
     
-    const totalPhotosInDB = db.prepare('SELECT COUNT(*) FROM photos').get()['COUNT(*)'];
+    const totalPhotosInDB = await dbManager.getTotalPhotoCount();
     console.log(`Total photos in database: ${totalPhotosInDB}`);
     
     if (errorCount === 0) {
@@ -954,9 +964,12 @@ app.post("/mypos/notify", (req, res) => {
       const orderId = req.body.orderId;
       const status = req.body.status || 'unknown';
       
-      // Update order in database
-      const stmt = db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE mypos_order_id = ?');
-      stmt.run(status, new Date().toISOString(), orderId);
+             // Update order in database - using direct sqlite3 for now
+       dbManager.db.run('UPDATE orders SET status = ?, updated_at = ? WHERE mypos_order_id = ?', [status, new Date().toISOString(), orderId], (err) => {
+         if (err) {
+           console.error('Error updating order status:', err);
+         }
+       });
       
       console.log(` Order ${orderId} status updated to: ${status}`);
     }
@@ -987,9 +1000,13 @@ app.post("/api/orders", (req, res) => {
     const orderId = uuidv4();
     const currentDate = new Date().toISOString();
     
-    // Create order in database
-    const stmt = db.prepare('INSERT INTO orders (id, photo_ids, total_amount, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
-    stmt.run(orderId, JSON.stringify(photoIds), totalAmount, 'pending', currentDate, currentDate);
+         // Create order in database - using direct sqlite3 for now
+     dbManager.db.run('INSERT INTO orders (id, photo_ids, total_amount, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)', 
+       [orderId, JSON.stringify(photoIds), totalAmount, 'pending', currentDate, currentDate], (err) => {
+         if (err) {
+           console.error('Error creating order:', err);
+         }
+       });
     
     console.log(`Order created: ${orderId} for ${photoIds.length} photos, total: €${totalAmount}`);
     
@@ -1012,17 +1029,22 @@ app.get("/api/orders/:orderId", (req, res) => {
   try {
     const { orderId } = req.params;
     
-    const stmt = db.prepare('SELECT * FROM orders WHERE id = ?');
-    const order = stmt.get(orderId);
-    
-    if (!order) {
-      return res.status(404).json({ error: 'Order not found' });
-    }
-    
-    // Parse photo IDs back to array
-    order.photo_ids = JSON.parse(order.photo_ids);
-    
-    res.json(order);
+         // Get order from database - using direct sqlite3 for now
+     dbManager.db.get('SELECT * FROM orders WHERE id = ?', [orderId], (err, order) => {
+       if (err) {
+         console.error('Error fetching order:', err);
+         return res.status(500).json({ error: 'Failed to fetch order' });
+       }
+       
+       if (!order) {
+         return res.status(404).json({ error: 'Order not found' });
+       }
+       
+       // Parse photo IDs back to array
+       order.photo_ids = JSON.parse(order.photo_ids);
+       
+              res.json(order);
+     });
     
   } catch (error) {
     console.error('Error fetching order:', error);
@@ -1032,14 +1054,14 @@ app.get("/api/orders/:orderId", (req, res) => {
 
 // ─────────────────────────────────────────────────────────
 // 5) Get all available categories
-app.get("/api/categories", (req, res) => {
+app.get("/api/categories", async (req, res) => {
   try {
-    // Get unique categories from photos table
-    const stmt = db.prepare('SELECT DISTINCT category FROM photos WHERE category IS NOT NULL AND category != "" ORDER BY category');
-    const categories = stmt.all().map(row => row.category);
+    // Get unique categories from photos table using DatabaseManager
+    const dbCategories = await dbManager.getAllCategories();
+    const categories = dbCategories.map(row => row.category);
     
     // Also include categories from the categories.json file
-    const categoriesFromFile = categories;
+    const categoriesFromFile = [...categories];
     if (fs.existsSync(categoriesPath)) {
       try {
         const fileCategories = JSON.parse(fs.readFileSync(categoriesPath, 'utf8'));

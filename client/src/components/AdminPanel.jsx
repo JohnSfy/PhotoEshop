@@ -6,23 +6,7 @@ import axios from 'axios';
 const AdminPanel = () => {
   console.log('AdminPanel: Component rendering...');
   
-  try {
-    const { photos, uploadPhotos, fetchPhotos, fetchCategories } = usePhotos();
-    console.log('AdminPanel: usePhotos hook result:', { photos: photos?.length, hasUploadPhotos: !!uploadPhotos, hasFetchPhotos: !!fetchPhotos, hasFetchCategories: !!fetchCategories });
-  } catch (error) {
-    console.error('AdminPanel: Error in usePhotos hook:', error);
-    return (
-      <div className="max-w-6xl mx-auto p-8">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-red-600 mb-4">Error Loading Admin Panel</h1>
-          <p className="text-gray-600 mb-4">There was an error initializing the component.</p>
-          <pre className="text-sm text-red-500 bg-red-50 p-4 rounded-lg overflow-auto">{error.message}</pre>
-        </div>
-      </div>
-    );
-  }
-  
-  const { photos, uploadPhotos, fetchPhotos, fetchCategories } = usePhotos();
+  const { photos, uploadPhotos, fetchPhotos, fetchCategories, categories } = usePhotos();
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState('');
@@ -36,7 +20,7 @@ const AdminPanel = () => {
   const [deleteSuccess, setDeleteSuccess] = useState('');
   
   // Category management state
-  const [categories, setCategories] = useState([]);
+
   const [selectedCategory, setSelectedCategory] = useState('general');
   const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [newCategory, setNewCategory] = useState('');
@@ -53,16 +37,7 @@ const AdminPanel = () => {
     }
   }, [fetchCategories]);
 
-  // Fetch categories
-  const fetchCategories = async () => {
-    try {
-      const response = await axios.get('/api/categories');
-      setCategories(response.data);
-      console.log('Categories refreshed:', response.data);
-    } catch (error) {
-      console.error('Error fetching categories:', error);
-    }
-  };
+
 
   // Refresh both photos and categories
   const refreshAll = async () => {
@@ -92,14 +67,10 @@ const AdminPanel = () => {
       setNewCategory('');
       setShowCategoryForm(false);
       
-      // Immediately add to local state for instant UI update
-      const newCategoryName = response.data.category;
-      setCategories(prev => [...prev, newCategoryName]);
-      
       // Auto-select the new category
-      setSelectedCategory(newCategoryName);
+      setSelectedCategory(response.data.category);
       
-      // Also refresh from server to ensure consistency
+      // Refresh categories from server to ensure consistency
       setTimeout(() => fetchCategories(), 100);
       
     } catch (error) {
@@ -120,16 +91,12 @@ const AdminPanel = () => {
       const response = await axios.delete(`/api/categories/${encodeURIComponent(categoryName)}`);
       console.log('Category deleted:', response.data);
       
-      // Immediately remove from local state for instant UI update
-      setCategories(prev => prev.filter(cat => cat !== categoryName));
-      
       // Clear selection if deleted category was selected
       if (selectedCategory === categoryName) {
-        const remainingCategories = categories.filter(cat => cat !== categoryName);
-        setSelectedCategory(remainingCategories.length > 0 ? remainingCategories[0] : '');
+        setSelectedCategory('general'); // Reset to default
       }
       
-      // Also refresh photos and server data
+      // Refresh photos and server data
       setTimeout(async () => {
         await fetchCategories();
         await fetchPhotos();

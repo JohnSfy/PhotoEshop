@@ -14,7 +14,8 @@ const PhotoGallery = () => {
     categories, 
     selectedCategory, 
     setSelectedCategory,
-    fetchPhotos 
+    fetchPhotos,
+    fetchCategories 
   } = usePhotos();
   const { addToCart, isInCart } = useCart();
   const [selectedPhoto, setSelectedPhoto] = useState(null);

@@ -3,6 +3,7 @@ services:
     name: image-buy-app-backend
     env: node
     plan: free
+    nodeVersion: 18.19.0
     buildCommand: cd backend && npm install
     startCommand: cd backend && npm start
     envVars:
