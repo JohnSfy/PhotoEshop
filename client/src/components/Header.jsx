@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ShoppingCart, Camera, User, LogOut } from 'lucide-react';
-import { useCart } from '../context/CartContext';
+import { useCart } from '../context/CartContext.jsx';
 
 const Header = ({ isAdmin, setIsAdmin }) => {
   const { cartCount } = useCart();

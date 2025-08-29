@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { myPOSService } from '../services/myposService';
+import { myPOSService } from '../services/myposService.jsx';
 
 const OrderContext = createContext();
 

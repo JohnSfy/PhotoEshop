@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useOrder } from '../context/OrderContext';
+import { useOrder } from '../context/OrderContext.jsx';
 import { CheckCircle, Download, Mail, Home, Receipt } from 'lucide-react';
 
 const PaymentSuccess = () => {

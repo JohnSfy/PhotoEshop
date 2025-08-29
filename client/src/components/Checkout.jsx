@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useCart } from '../context/CartContext';
-import { useOrder } from '../context/OrderContext';
+import { useCart } from '../context/CartContext.jsx';
+import { useOrder } from '../context/OrderContext.jsx';
 import { ArrowLeft, CreditCard, Mail, User, CheckCircle, AlertCircle, ExternalLink, Clock, Loader2 } from 'lucide-react';
 
 const Checkout = () => {

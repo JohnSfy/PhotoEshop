@@ -1,14 +1,30 @@
 import React, { useState } from 'react';
 import { Heart, ShoppingCart, Eye, Filter } from 'lucide-react';
-import { usePhotos } from '../context/PhotoContext';
-import { useCart } from '../context/CartContext';
-import PhotoModal from './PhotoModal';
+import { usePhotos } from '../context/PhotoContext.jsx';
+import { useCart } from '../context/CartContext.jsx';
+import PhotoModal from './PhotoModal.jsx';
 
 const PhotoGallery = () => {
-  const { photos, loading, error, filter, setFilter } = usePhotos();
+  const { 
+    photos, 
+    loading, 
+    error, 
+    filter, 
+    setFilter, 
+    categories, 
+    selectedCategory, 
+    setSelectedCategory,
+    fetchPhotos 
+  } = usePhotos();
   const { addToCart, isInCart } = useCart();
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [viewMode, setViewMode] = useState('grid'); // grid or list
+
+  // Handle category change
+  const handleCategoryChange = async (category) => {
+    setSelectedCategory(category);
+    await fetchPhotos(category);
+  };
 
   if (loading) {
     return (
@@ -47,16 +63,51 @@ const PhotoGallery = () => {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Event Photo Gallery</h1>
+          {selectedCategory !== 'all' && (
+            <div className="mt-2">
+              <span className="inline-block bg-primary-100 text-primary-800 px-3 py-1 rounded-full text-sm font-medium">
+                Category: {selectedCategory}
+              </span>
+            </div>
+          )}
           <p className="text-gray-600 mt-2">
             Browse watermarked preview photos. Add your favorites to cart to purchase clean, high-resolution versions.
           </p>
           <p className="text-sm text-gray-500 mt-1">
             💡 All photos shown are watermarked previews. Clean versions are delivered after payment.
           </p>
+          <p className="text-sm text-gray-400 mt-1">
+            Showing {photos.length} photo{photos.length !== 1 ? 's' : ''}
+            {selectedCategory !== 'all' ? ` in ${selectedCategory}` : ''}
+          </p>
         </div>
         
         <div className="flex items-center space-x-4">
-          {/* Filter */}
+          {/* Category Filter */}
+          <div className="flex items-center space-x-2">
+            <Filter className="h-5 w-5 text-gray-500" />
+            <select
+              value={selectedCategory}
+              onChange={(e) => handleCategoryChange(e.target.value)}
+              className="input-field py-1 px-2 text-sm"
+            >
+              <option value="all">All Categories</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={fetchCategories}
+              className="text-primary-600 hover:text-primary-700 text-xs font-medium ml-2"
+              title="Refresh categories"
+            >
+              🔄
+            </button>
+          </div>
+
+          {/* Time Filter */}
           <div className="flex items-center space-x-2">
             <Filter className="h-5 w-5 text-gray-500" />
             <select
@@ -64,7 +115,7 @@ const PhotoGallery = () => {
               onChange={(e) => setFilter(e.target.value)}
               className="input-field py-1 px-2 text-sm"
             >
-              <option value="all">All Photos</option>
+              <option value="all">All Time</option>
               <option value="recent">Recent (7 days)</option>
             </select>
           </div>

@@ -1,28 +1,28 @@
 import axios from 'axios';
 
 // Base API URL - adjust this to match your backend
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 // myPOS configuration - these should come from environment variables in production
 const MYPOS_CONFIG = {
   // myPOS Sandbox/Live configuration
   // These values should be provided by myPOS
-  merchantId: process.env.REACT_APP_MYPOS_MERCHANT_ID || 'demo',
-  posId: process.env.REACT_APP_MYPOS_POS_ID || 'demo',
-  clientId: process.env.REACT_APP_MYPOS_CLIENT_ID || 'demo',
-  clientSecret: process.env.REACT_APP_MYPOS_CLIENT_SECRET || 'demo',
+  merchantId: import.meta.env.VITE_MYPOS_MERCHANT_ID || 'demo',
+  posId: import.meta.env.VITE_MYPOS_POS_ID || 'demo',
+  clientId: import.meta.env.VITE_MYPOS_CLIENT_ID || 'demo',
+  clientSecret: import.meta.env.VITE_MYPOS_CLIENT_SECRET || 'demo',
   
   // myPOS API endpoints
-  apiUrl: process.env.REACT_APP_MYPOS_API_URL || 'https://mypos.com/v2/',
+  apiUrl: import.meta.env.VITE_MYPOS_API_URL || 'https://mypos.com/v2/',
   
   // Currency and language
   currency: 'EUR',
   language: 'en',
   
   // Callback URLs
-  successUrl: process.env.REACT_APP_MYPOS_SUCCESS_URL || 'http://localhost:3000/payment/success',
-  cancelUrl: process.env.REACT_APP_MYPOS_CANCEL_URL || 'http://localhost:3000/payment/cancel',
-  notifyUrl: process.env.REACT_APP_MYPOS_NOTIFY_URL || 'http://localhost:5000/mypos/notify',
+  successUrl: import.meta.env.VITE_MYPOS_SUCCESS_URL || 'http://localhost:5173/payment/success',
+  cancelUrl: import.meta.env.VITE_MYPOS_CANCEL_URL || 'http://localhost:5173/payment/cancel',
+  notifyUrl: import.meta.env.VITE_MYPOS_NOTIFY_URL || 'http://localhost:5000/mypos/notify',
 };
 
 class MyPOSService {

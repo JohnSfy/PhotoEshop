@@ -1031,7 +1031,37 @@ app.get("/api/orders/:orderId", (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────
-// 5) Health check endpoint
+// 5) Get all available categories
+app.get("/api/categories", (req, res) => {
+  try {
+    // Get unique categories from photos table
+    const stmt = db.prepare('SELECT DISTINCT category FROM photos WHERE category IS NOT NULL AND category != "" ORDER BY category');
+    const categories = stmt.all().map(row => row.category);
+    
+    // Also include categories from the categories.json file
+    const categoriesFromFile = categories;
+    if (fs.existsSync(categoriesPath)) {
+      try {
+        const fileCategories = JSON.parse(fs.readFileSync(categoriesPath, 'utf8'));
+        fileCategories.forEach(cat => {
+          if (!categoriesFromFile.includes(cat)) {
+            categoriesFromFile.push(cat);
+          }
+        });
+      } catch (error) {
+        console.error('Error reading categories.json:', error);
+      }
+    }
+    
+    res.json(categoriesFromFile);
+  } catch (error) {
+    console.error('Error fetching categories:', error);
+    res.status(500).json({ error: 'Failed to fetch categories' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// 6) Health check endpoint
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 // Serve React app in production

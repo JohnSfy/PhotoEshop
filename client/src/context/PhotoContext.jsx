@@ -13,25 +13,46 @@ export const usePhotos = () => {
 
 export const PhotoProvider = ({ children }) => {
   const [photos, setPhotos] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all');
+  const [selectedCategory, setSelectedCategory] = useState('all');
 
   // Fetch photos from API
-  const fetchPhotos = async () => {
+  const fetchPhotos = async (category = null) => {
     try {
       console.log('PhotoContext: Fetching watermarked photos from /api/photos/watermarked');
       setLoading(true);
-      const response = await axios.get('/api/photos/watermarked');
+      const url = category && category !== 'all' 
+        ? `/api/photos/watermarked?category=${encodeURIComponent(category)}`
+        : '/api/photos/watermarked';
+      const response = await axios.get(url);
       console.log('PhotoContext: Watermarked photos fetched successfully:', response.data);
       setPhotos(response.data);
       setError(null);
+      
+      // Also refresh categories to keep them in sync
+      await fetchCategories();
     } catch (err) {
       console.error('PhotoContext: Error fetching watermarked photos:', err);
       console.error('PhotoContext: Error response:', err.response);
       setError('Failed to load photos');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Fetch categories from API
+  const fetchCategories = async () => {
+    try {
+      console.log('PhotoContext: Fetching categories from /api/categories');
+      const response = await axios.get('/api/categories');
+      console.log('PhotoContext: Categories fetched successfully:', response.data);
+      setCategories(response.data);
+    } catch (err) {
+      console.error('PhotoContext: Error fetching categories:', err);
+      console.error('PhotoContext: Error response:', err.response);
     }
   };
 
@@ -53,8 +74,9 @@ export const PhotoProvider = ({ children }) => {
       });
       
       console.log('PhotoContext: API response received:', response);
-      console.log('PhotoContext: Refreshing photos...');
+      console.log('PhotoContext: Refreshing photos and categories...');
       await fetchPhotos();
+      await fetchCategories(); // Refresh categories after upload
       console.log('PhotoContext: Upload completed successfully');
       return response.data;
     } catch (err) {
@@ -93,18 +115,23 @@ export const PhotoProvider = ({ children }) => {
 
   useEffect(() => {
     fetchPhotos();
+    fetchCategories();
   }, []);
 
   const value = {
     photos: filteredPhotos,
     allPhotos: photos,
+    categories,
     loading,
     error,
     filter,
     setFilter,
+    selectedCategory,
+    setSelectedCategory,
     fetchPhotos,
     uploadPhotos,
-    fetchCleanPhotos
+    fetchCleanPhotos,
+    fetchCategories,
   };
 
   return (

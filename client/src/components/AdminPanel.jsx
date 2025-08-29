@@ -1,10 +1,28 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Image, Package, Users, DollarSign, Trash2, Eye } from 'lucide-react';
-import { usePhotos } from '../context/PhotoContext';
+import { usePhotos } from '../context/PhotoContext.jsx';
 import axios from 'axios';
 
 const AdminPanel = () => {
-  const { photos, uploadPhotos, fetchPhotos } = usePhotos();
+  console.log('AdminPanel: Component rendering...');
+  
+  try {
+    const { photos, uploadPhotos, fetchPhotos, fetchCategories } = usePhotos();
+    console.log('AdminPanel: usePhotos hook result:', { photos: photos?.length, hasUploadPhotos: !!uploadPhotos, hasFetchPhotos: !!fetchPhotos, hasFetchCategories: !!fetchCategories });
+  } catch (error) {
+    console.error('AdminPanel: Error in usePhotos hook:', error);
+    return (
+      <div className="max-w-6xl mx-auto p-8">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-red-600 mb-4">Error Loading Admin Panel</h1>
+          <p className="text-gray-600 mb-4">There was an error initializing the component.</p>
+          <pre className="text-sm text-red-500 bg-red-50 p-4 rounded-lg overflow-auto">{error.message}</pre>
+        </div>
+      </div>
+    );
+  }
+  
+  const { photos, uploadPhotos, fetchPhotos, fetchCategories } = usePhotos();
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState('');
@@ -28,16 +46,31 @@ const AdminPanel = () => {
 
   // Fetch events and categories on component mount
   useEffect(() => {
-    fetchCategories();
-  }, []);
+    try {
+      fetchCategories();
+    } catch (error) {
+      console.error('Error in useEffect:', error);
+    }
+  }, [fetchCategories]);
 
   // Fetch categories
   const fetchCategories = async () => {
     try {
       const response = await axios.get('/api/categories');
       setCategories(response.data);
+      console.log('Categories refreshed:', response.data);
     } catch (error) {
       console.error('Error fetching categories:', error);
+    }
+  };
+
+  // Refresh both photos and categories
+  const refreshAll = async () => {
+    try {
+      await Promise.all([fetchPhotos(), fetchCategories()]);
+      console.log('Photos and categories refreshed');
+    } catch (error) {
+      console.error('Error refreshing data:', error);
     }
   };
 
@@ -121,10 +154,11 @@ const AdminPanel = () => {
 
   // Handle select all photos
   const handleSelectAll = () => {
-    if (selectedPhotos.length === photos.length) {
+    const filteredPhotos = photos.filter(photo => selectedCategory === 'all' || photo.category === selectedCategory);
+    if (selectedPhotos.length === filteredPhotos.length) {
       setSelectedPhotos([]);
     } else {
-      setSelectedPhotos(photos.map(photo => photo.id));
+      setSelectedPhotos(filteredPhotos.map(photo => photo.id));
     }
   };
 
@@ -309,11 +343,25 @@ const AdminPanel = () => {
     { id: 'analytics', label: 'Analytics', icon: DollarSign }
   ];
 
+  // Add error boundary
+  if (!photos || !categories) {
+    return (
+      <div className="max-w-6xl mx-auto p-8">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">Loading Admin Panel...</h1>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
+          <p className="text-gray-600 mt-4">Initializing components...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900">Admin Panel</h1>
         <p className="text-gray-600 mt-2">Manage your photo gallery and monitor sales</p>
+        <p className="text-sm text-gray-500 mt-1">Debug: Photos: {photos?.length || 0}, Categories: {categories?.length || 0}</p>
       </div>
 
       {/* Tabs */}
@@ -385,9 +433,19 @@ const AdminPanel = () => {
             )}
             
             {/* Custom Categories with Delete Buttons */}
-            {categories.length > 0 && (
-              <div className="mt-3">
-                <p className="text-sm text-gray-600 mb-2">Available Categories:</p>
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm text-gray-600">Available Categories:</p>
+                <button
+                  type="button"
+                  onClick={fetchCategories}
+                  className="text-primary-600 hover:text-primary-700 text-xs font-medium"
+                  title="Refresh categories"
+                >
+                  🔄 Refresh
+                </button>
+              </div>
+              {categories.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {categories.map(category => (
                     <div key={category} className="flex items-center space-x-2 bg-gray-100 px-3 py-1 rounded-full">
@@ -403,8 +461,10 @@ const AdminPanel = () => {
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
+              ) : (
+                <p className="text-sm text-gray-500 italic">No categories available</p>
+              )}
+            </div>
           </div>
 
           <form onSubmit={handlePhotoUpload} className="space-y-6">
@@ -464,26 +524,70 @@ const AdminPanel = () => {
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-gray-900">Photo Gallery</h2>
-            <p className="text-gray-600">{photos.length} photos total</p>
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={refreshAll}
+                className="btn-primary text-sm"
+                title="Refresh all data"
+              >
+                🔄 Refresh All
+              </button>
+              <button
+                onClick={fetchPhotos}
+                className="btn-secondary text-sm"
+                title="Refresh photos"
+              >
+                🔄 Refresh Photos
+              </button>
+              {/* Category Filter */}
+              <div className="flex items-center space-x-2">
+                <label className="text-sm font-medium text-gray-700">Category:</label>
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="input-field py-1 px-2 text-sm"
+                >
+                  <option value="all">All Categories</option>
+                  {categories.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={fetchCategories}
+                  className="text-primary-600 hover:text-primary-700 text-xs font-medium"
+                  title="Refresh categories"
+                >
+                  🔄 Refresh Categories
+                </button>
+                <p className="text-gray-600">
+                  {photos.filter(photo => selectedCategory === 'all' || photo.category === selectedCategory).length} photos
+                  {selectedCategory !== 'all' ? ` in ${selectedCategory}` : ' total'}
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Selection Controls */}
-          {photos.length > 0 && (
+          {photos.filter(photo => selectedCategory === 'all' || photo.category === selectedCategory).length > 0 && (
             <div className="flex items-center justify-between bg-gray-50 p-4 rounded-lg">
               <div className="flex items-center space-x-4">
                 <label className="flex items-center space-x-2">
                   <input
                     type="checkbox"
-                    checked={selectedPhotos.length === photos.length}
+                    checked={selectedPhotos.length === photos.filter(photo => selectedCategory === 'all' || photo.category === selectedCategory).length}
                     onChange={handleSelectAll}
                     className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                   />
                   <span className="text-sm font-medium text-gray-700">
-                    {selectedPhotos.length === photos.length ? 'Deselect All' : 'Select All'}
+                    {selectedPhotos.length === photos.filter(photo => selectedCategory === 'all' || photo.category === selectedCategory).length ? 'Deselect All' : 'Select All'}
                   </span>
                 </label>
                 <span className="text-sm text-gray-500">
-                  {selectedPhotos.length} of {photos.length} selected
+                  {selectedPhotos.length} of {photos.filter(photo => selectedCategory === 'all' || photo.category === selectedCategory).length} selected
                 </span>
               </div>
               
@@ -513,7 +617,9 @@ const AdminPanel = () => {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {photos.map((photo) => (
+            {photos
+              .filter(photo => selectedCategory === 'all' || photo.category === selectedCategory)
+              .map((photo) => (
               <div key={photo.id} className="card overflow-hidden">
                 <div className="relative aspect-square">
                   <img
@@ -540,9 +646,14 @@ const AdminPanel = () => {
                   <h3 className="font-medium text-gray-900 truncate mb-2">
                     {photo.filename}
                   </h3>
-                  <p className="text-sm text-gray-500 mb-3">
-                    {new Date(photo.updated).toLocaleDateString()}
-                  </p>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm text-gray-500">
+                      {new Date(photo.updated).toLocaleDateString()}
+                    </p>
+                    <span className="inline-block bg-primary-100 text-primary-800 px-2 py-1 rounded-full text-xs font-medium">
+                      {photo.category || 'No Category'}
+                    </span>
+                  </div>
                   
                   <div className="flex items-center justify-between">
                     <button
