@@ -14,7 +14,3 @@ services:
         value: ./database/photos.db
     healthCheckPath: /health
     autoDeploy: true
-    disk:
-      name: database-storage
-      mountPath: /opt/render/project/src/backend/database
-      sizeGB: 1
