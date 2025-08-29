@@ -18,7 +18,6 @@ const crypto = require('crypto');
 // (προαιρετικά) MYPOS_PUBLIC_CERT_PEM="-----BEGIN CERTIFICATE-----\n..."  // για verify notify
 const {
   PORT = 5000,
-  ALLOWED_ORIGIN = "http://localhost:3000",
   MYPOS_PRIVATE_KEY_PEM,
   MYPOS_PUBLIC_CERT_PEM, // sandbox public cert (μόνο για επαλήθευση)
 } = process.env;
@@ -63,8 +62,8 @@ dbManager.db.run(`
   CREATE TABLE IF NOT EXISTS photos (
     id TEXT PRIMARY KEY,
     filename TEXT,
-    path_to_watermark TEXT,
-    path_to_clean TEXT,
+    watermark_path TEXT,
+    clean_path TEXT,
     updated TEXT,
     price REAL,
     category TEXT
@@ -85,7 +84,7 @@ dbManager.db.run(`
 `);
 
 // Middleware
-app.use(cors({ origin: ALLOWED_ORIGIN, credentials: false }));
+app.use(cors({ origin: true, credentials: false }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false })); // For myPOS notify
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
@@ -439,26 +438,31 @@ app.get('/api/photos/watermarked', async (req, res) => {
       // Filter by category
       watermarkedPhotos = await dbManager.getPhotosByCategory(category);
       // Filter to only include photos with watermarks
-      watermarkedPhotos = watermarkedPhotos.filter(photo => photo.path_to_watermark);
+      watermarkedPhotos = watermarkedPhotos.filter(photo => photo.watermark_path);
     } else {
       // Get all photos
       watermarkedPhotos = await dbManager.getAllPhotos();
       // Filter to only include photos with watermarks
-      watermarkedPhotos = watermarkedPhotos.filter(photo => photo.path_to_watermark);
+      watermarkedPhotos = watermarkedPhotos.filter(photo => photo.watermark_path);
     }
     
     console.log(`Found ${watermarkedPhotos.length} photos in database`);
     
     // Verify files exist and add full URLs
     const verifiedPhotos = watermarkedPhotos.map(photo => {
-      const fullPath = path.join(__dirname, '..', photo.path_to_watermark);
+      // Map database columns to expected frontend format
+      const watermarkPath = photo.watermark_path || photo.path_to_watermark;
+      const cleanPath = photo.clean_path || photo.path_to_clean;
+      
+      const fullPath = path.join(__dirname, '..', watermarkPath);
       const fileExists = fs.existsSync(fullPath);
       
-      console.log(`Photo ${photo.id}: ${photo.path_to_watermark} - Exists: ${fileExists}`);
+      console.log(`Photo ${photo.id}: ${watermarkPath} - Exists: ${fileExists}`);
       
       return {
         ...photo,
-        path_to_watermark: `/${photo.path_to_watermark}`, // Add leading slash for proper URL
+        path_to_watermark: `/${watermarkPath}`, // Add leading slash for proper URL
+        path_to_clean: cleanPath ? `/${cleanPath}` : null,
         fileExists
       };
     });
@@ -518,8 +522,8 @@ async function scanExistingWatermarkedPhotos() {
           const photo = {
             id: photoId,
             filename: `${photoNumber}-${photoId}-watermark.${extension}`,
-            path_to_watermark: `uploads/watermarked/${filename}`,
-            path_to_clean: hasCleanVersion ? `uploads/clean/${cleanFilename}` : null,
+            watermark_path: `uploads/watermarked/${filename}`,
+            clean_path: hasCleanVersion ? `uploads/clean/${cleanFilename}` : null,
             price: 5.99,
             category: 'event_photos',
             updated: new Date().toISOString()
@@ -527,8 +531,8 @@ async function scanExistingWatermarkedPhotos() {
           
                      const photoData = {
              id: photo.id,
-             watermarkPath: photo.path_to_watermark,
-             cleanPath: photo.path_to_clean,
+             watermarkPath: photo.watermark_path,
+             cleanPath: photo.clean_path,
              filename: photo.filename,
              price: photo.price,
              category: photo.category
@@ -608,7 +612,7 @@ app.post('/api/photos/re-watermark', async (req, res) => {
     
          // Get all photos that have clean versions using DatabaseManager
      const photos = await dbManager.getAllPhotos();
-     const photosWithClean = photos.filter(photo => photo.path_to_clean);
+     const photosWithClean = photos.filter(photo => photo.clean_path);
     
          console.log(`Found ${photosWithClean.length} photos to re-watermark`);
      
@@ -618,8 +622,8 @@ app.post('/api/photos/re-watermark', async (req, res) => {
      for (const photo of photosWithClean) {
       try {
         // Get the clean file path
-        const cleanPath = path.join(__dirname, '..', photo.path_to_clean);
-        const watermarkedPath = path.join(__dirname, '..', photo.path_to_watermark);
+        const cleanPath = path.join(__dirname, '..', photo.clean_path);
+                  const watermarkedPath = path.join(__dirname, '..', photo.watermark_path);
         
         // Check if clean file exists
         if (!fs.existsSync(cleanPath)) {
@@ -688,24 +692,23 @@ app.delete('/api/photos/delete', async (req, res) => {
         console.log(`\n--- Deleting photo: ${photo.filename} (ID: ${photo.id}) ---`);
         
         // Delete watermarked file
-        if (photo.path_to_watermark) {
-          const watermarkedPath = path.join(__dirname, '..', photo.path_to_watermark);
+        if (photo.watermark_path) {
+          const watermarkedPath = path.join(__dirname, '..', photo.watermark_path);
           if (fs.existsSync(watermarkedPath)) {
             fs.unlinkSync(watermarkedPath);
-            deletedFiles.push(`Watermarked: ${photo.path_to_watermark}`);
-            console.log(`✅ Deleted watermarked file: ${photo.path_to_watermark}`);
+            deletedFiles.push(`Watermarked: ${photo.watermark_path}`);
+            console.log(`✅ Deleted watermarked file: ${photo.watermark_path}`);
           } else {
             console.log(`⚠️ Watermarked file not found: ${watermarkedPath}`);
           }
         }
         
         // Delete clean file
-        if (photo.path_to_clean) {
-          const cleanPath = path.join(__dirname, '..', photo.path_to_clean);
+        if (photo.clean_path) {
+          const cleanPath = path.join(__dirname, '..', photo.clean_path);
           if (fs.existsSync(cleanPath)) {
             fs.unlinkSync(cleanPath);
-            deletedFiles.push(`Clean: ${photo.path_to_clean}`);
-            console.log(`✅ Deleted clean file: ${photo.path_to_clean}`);
+            console.log(`✅ Deleted clean file: ${photo.clean_path}`);
           } else {
             console.log(`⚠️ Clean file not found: ${cleanPath}`);
           }
@@ -1086,12 +1089,7 @@ app.get("/api/categories", async (req, res) => {
 // 6) Health check endpoint
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
-// Serve React app in production
-if (process.env.NODE_ENV === 'production') {
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'client', 'build', 'index.html'));
-  });
-}
+// Backend API only - no frontend serving
 
 // Error handling middleware
 app.use((error, req, res, next) => {
@@ -1115,7 +1113,6 @@ app.listen(PORT, () => {
   console.log(` Server running on port ${PORT}`);
   console.log(` Photo upload directory: ${path.join(__dirname, '..', 'uploads')}`);
   console.log(` myPOS payment endpoints: ${MYPOS_PRIVATE_KEY_PEM ? 'ENABLED' : 'DISABLED'}`);
-  console.log(` Allowed origin: ${ALLOWED_ORIGIN}`);
   console.log(` Health check: http://localhost:${PORT}/health`);
   console.log(` API helper: http://localhost:${PORT}/api/helper`);
 });
