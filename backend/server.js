@@ -7,7 +7,7 @@ const sharp = require('sharp');
 const nodemailer = require('nodemailer');
 const { v4: uuidv4 } = require('uuid');
 const DatabaseManager = require('./database/dbManager');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const crypto = require('crypto');
 
 // ─────────── ENV ───────────
@@ -87,7 +87,7 @@ dbManager.db.run(`
 app.use(cors({ origin: true, credentials: false }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false })); // For myPOS notify
-app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api', express.json());
 
 // Configure multer for file uploads
@@ -108,10 +108,10 @@ const upload = multer({
 
 // Helper function to get upload paths
 function getUploadPaths() {
-  const rootDir = path.join(__dirname, '..'); // Go up to root project directory
+  const backendDir = __dirname; // Use current backend directory
   return {
-    clean: path.join(rootDir, 'uploads', 'clean'),
-    watermarked: path.join(rootDir, 'uploads', 'watermarked')
+    clean: path.join(backendDir, 'uploads', 'clean'),
+    watermarked: path.join(backendDir, 'uploads', 'watermarked')
   };
 }
 
@@ -454,7 +454,7 @@ app.get('/api/photos/watermarked', async (req, res) => {
       const watermarkPath = photo.watermark_path || photo.path_to_watermark;
       const cleanPath = photo.clean_path || photo.path_to_clean;
       
-      const fullPath = path.join(__dirname, '..', watermarkPath);
+      const fullPath = path.join(__dirname, watermarkPath);
       const fileExists = fs.existsSync(fullPath);
       
       console.log(`Photo ${photo.id}: ${watermarkPath} - Exists: ${fileExists}`);
@@ -622,8 +622,8 @@ app.post('/api/photos/re-watermark', async (req, res) => {
      for (const photo of photosWithClean) {
       try {
         // Get the clean file path
-        const cleanPath = path.join(__dirname, '..', photo.clean_path);
-                  const watermarkedPath = path.join(__dirname, '..', photo.watermark_path);
+                const cleanPath = path.join(__dirname, photo.clean_path);
+        const watermarkedPath = path.join(__dirname, photo.watermark_path);
         
         // Check if clean file exists
         if (!fs.existsSync(cleanPath)) {
@@ -693,7 +693,7 @@ app.delete('/api/photos/delete', async (req, res) => {
         
         // Delete watermarked file
         if (photo.watermark_path) {
-          const watermarkedPath = path.join(__dirname, '..', photo.watermark_path);
+          const watermarkedPath = path.join(__dirname, photo.watermark_path);
           if (fs.existsSync(watermarkedPath)) {
             fs.unlinkSync(watermarkedPath);
             deletedFiles.push(`Watermarked: ${photo.watermark_path}`);
@@ -705,7 +705,7 @@ app.delete('/api/photos/delete', async (req, res) => {
         
         // Delete clean file
         if (photo.clean_path) {
-          const cleanPath = path.join(__dirname, '..', photo.clean_path);
+          const cleanPath = path.join(__dirname, photo.clean_path);
           if (fs.existsSync(cleanPath)) {
             fs.unlinkSync(cleanPath);
             console.log(`✅ Deleted clean file: ${photo.clean_path}`);
@@ -1111,7 +1111,7 @@ app.use((error, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(` Server running on port ${PORT}`);
-  console.log(` Photo upload directory: ${path.join(__dirname, '..', 'uploads')}`);
+  console.log(` Photo upload directory: ${path.join(__dirname, 'uploads')}`);
   console.log(` myPOS payment endpoints: ${MYPOS_PRIVATE_KEY_PEM ? 'ENABLED' : 'DISABLED'}`);
   console.log(` Health check: http://localhost:${PORT}/health`);
   console.log(` API helper: http://localhost:${PORT}/api/helper`);
