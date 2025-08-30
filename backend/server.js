@@ -9,7 +9,7 @@ const DatabaseManager = require('./database/dbManager');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 10000;
 
 // Initialize database
 const dbManager = new DatabaseManager();
