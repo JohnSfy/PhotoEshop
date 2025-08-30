@@ -19,6 +19,16 @@ app.use(cors({ origin: true, credentials: false }));
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Serve test.html for testing the API
+app.get('/test.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'test.html'));
+});
+
+// Serve test.html at root for easy access
+app.get('/', (req, res) => {
+  res.redirect('/test.html');
+});
+
 // Configure multer for file uploads
 const storage = multer.memoryStorage();
 const upload = multer({ 
