@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: image-buy-app-backend
+    env: node
+    plan: starter
+    region: oregon
+    buildCommand: |
+      cd backend
+      npm install
+      npm run build || echo "No build script found, continuing..."
+    startCommand: |
+      cd backend
+      npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    branch: main
+    
+    # Disk configuration for file uploads (persistent storage)
+    disk:
+      name: uploads-disk
+      mountPath: /opt/render/project/src/backend/uploads
+      sizeGB: 10
+    
+    # Environment variables
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        value: sqlite:///opt/render/project/src/backend/database/photos.db
+      - key: UPLOAD_MAX_SIZE
+        value: "50MB"
+      - key: UPLOAD_PATH
+        value: /opt/render/project/src/backend/uploads
+
+# Optional: PostgreSQL database service (uncomment if you want to use PostgreSQL)
+# databases:
+#   - name: image-buy-db
+#     databaseName: imagebuy
+#     user: imagebuy_user
+#     plan: starter
