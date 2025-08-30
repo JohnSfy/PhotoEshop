@@ -778,6 +778,15 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// GET /health - Render internal health check (simple, no database dependency)
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    message: 'Service is running'
+  });
+});
+
 // GET /api/stats - Get basic statistics
 app.get('/api/stats', async (req, res) => {
   try {
