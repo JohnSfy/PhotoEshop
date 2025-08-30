@@ -65,6 +65,45 @@ try {
   categories = ['nature', 'portrait', 'landscape', 'abstract', 'other'];
 }
 
+// Function to convert Greek letters to Greeklish (Latin characters)
+function convertGreekToGreeklish(text) {
+  if (!text) return `photo_${Date.now()}`;
+  
+  const greekToLatin = {
+    // Uppercase Greek letters
+    'Α': 'A', 'Β': 'B', 'Γ': 'G', 'Δ': 'D', 'Ε': 'E', 'Ζ': 'Z', 'Η': 'H', 'Θ': 'TH',
+    'Ι': 'I', 'Κ': 'K', 'Λ': 'L', 'Μ': 'M', 'Ν': 'N', 'Ξ': 'X', 'Ο': 'O', 'Π': 'P',
+    'Ρ': 'R', 'Σ': 'S', 'Τ': 'T', 'Υ': 'Y', 'Φ': 'F', 'Χ': 'CH', 'Ψ': 'PS', 'Ω': 'O',
+    
+    // Lowercase Greek letters
+    'α': 'a', 'β': 'b', 'γ': 'g', 'δ': 'd', 'ε': 'e', 'ζ': 'z', 'η': 'h', 'θ': 'th',
+    'ι': 'i', 'κ': 'k', 'λ': 'l', 'μ': 'm', 'ν': 'n', 'ξ': 'x', 'ο': 'o', 'π': 'p',
+    'ρ': 'r', 'σ': 's', 'τ': 't', 'υ': 'u', 'φ': 'f', 'χ': 'ch', 'ψ': 'ps', 'ω': 'o',
+    
+    // Greek accents and special characters
+    'ά': 'a', 'έ': 'e', 'ή': 'h', 'ί': 'i', 'ό': 'o', 'ύ': 'u', 'ώ': 'o',
+    'Ά': 'A', 'Έ': 'E', 'Ή': 'H', 'Ί': 'I', 'Ό': 'O', 'Ύ': 'U', 'Ώ': 'O',
+    'ϊ': 'i', 'ϋ': 'u', 'ΐ': 'i', 'ΰ': 'u',
+    'Ϊ': 'I', 'Ϋ': 'U'
+  };
+  
+  let result = text;
+  
+  // Convert Greek letters to Latin
+  for (const [greek, latin] of Object.entries(greekToLatin)) {
+    result = result.replace(new RegExp(greek, 'g'), latin);
+  }
+  
+  // Clean up any remaining problematic characters
+  result = result
+    .replace(/[<>:"/\\|?*]/g, '_')  // Replace forbidden characters
+    .replace(/\s+/g, '_')           // Replace spaces with underscores
+    .replace(/_{2,}/g, '_')         // Replace multiple underscores with single
+    .replace(/^_|_$/g, '');         // Remove leading/trailing underscores
+  
+  return result || `photo_${Date.now()}`;
+}
+
 // Function to create watermarked image with diagonal repeating watermarks
 async function createWatermarkedImage(inputBuffer, outputPath, watermarkText = 'Προστατευμένη Εικόνα') {
   try {
@@ -255,9 +294,12 @@ app.post('/api/photos/upload', upload.single('photo'), async (req, res) => {
 
     const { price = 5.99, category = 'other' } = req.body;
     const photoId = uuidv4();
-    const filename = req.file.originalname;
-    const extension = path.extname(filename);
-    const baseName = path.basename(filename, extension);
+    
+    // Convert Greek filename to Greeklish to prevent corruption
+    const originalFilename = req.file.originalname;
+    const extension = path.extname(originalFilename);
+    const baseName = path.basename(originalFilename, extension);
+    const filename = convertGreekToGreeklish(originalFilename);
 
     // Generate file paths
     const cleanFileName = `${photoId}-${baseName}-clean${extension}`;
@@ -308,7 +350,7 @@ app.post('/api/photos/upload', upload.single('photo'), async (req, res) => {
 });
 
 // POST /api/photos/upload-multiple - Upload multiple photos
-app.post('/api/photos/upload-multiple', upload.array('photos', 10), async (req, res) => {
+app.post('/api/photos/upload-multiple', upload.array('photos'), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: 'No photos uploaded' });
@@ -318,11 +360,14 @@ app.post('/api/photos/upload-multiple', upload.array('photos', 10), async (req, 
     const results = [];
 
     for (const file of req.files) {
-      try {
-        const photoId = uuidv4();
-        const filename = file.originalname;
-        const extension = path.extname(filename);
-        const baseName = path.basename(filename, extension);
+              try {
+          const photoId = uuidv4();
+          
+          // Convert Greek filename to Greeklish to prevent corruption
+          const originalFilename = file.originalname;
+          const extension = path.extname(originalFilename);
+          const baseName = path.basename(originalFilename, extension);
+          const filename = convertGreekToGreeklish(originalFilename);
 
         // Generate file paths
         const cleanFileName = `${photoId}-${baseName}-clean${extension}`;
