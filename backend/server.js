@@ -4,51 +4,34 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs-extra');
 const sharp = require('sharp');
-const nodemailer = require('nodemailer');
 const { v4: uuidv4 } = require('uuid');
 const DatabaseManager = require('./database/dbManager');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
-const crypto = require('crypto');
-
-// ─────────── ENV ───────────
-// .env:
-// PORT=5000 (or keep your existing PORT)
-// ALLOWED_ORIGIN=http://localhost:3000 (or your frontend URL)
-// MYPOS_PRIVATE_KEY_PEM="-----BEGIN PRIVATE KEY-----\n..."
-// (προαιρετικά) MYPOS_PUBLIC_CERT_PEM="-----BEGIN CERTIFICATE-----\n..."  // για verify notify
-const {
-  PORT = 5000,
-  MYPOS_PRIVATE_KEY_PEM,
-  MYPOS_PUBLIC_CERT_PEM, // sandbox public cert (μόνο για επαλήθευση)
-} = process.env;
-
-if (!MYPOS_PRIVATE_KEY_PEM) {
-  console.error(" Missing MYPOS_PRIVATE_KEY_PEM in env");
-  console.log(" myPOS payment functionality will be disabled");
-}
-
-// Load categories from JSON file
-const categoriesPath = path.join(__dirname, 'categories.json');
-let categories = [];
-
-try {
-  if (fs.existsSync(categoriesPath)) {
-    categories = JSON.parse(fs.readFileSync(categoriesPath, 'utf8'));
-  } else {
-    // Create empty categories file if it doesn't exist
-    categories = [];
-    fs.writeFileSync(categoriesPath, JSON.stringify(categories, null, 2));
-  }
-} catch (error) {
-  console.error('Error loading categories:', error);
-  categories = []; // Start with empty categories
-}
+require('dotenv').config();
 
 const app = express();
-app.set("trust proxy", true);
+const PORT = process.env.PORT || 5000;
 
-// Initialize SQLite database
+// Initialize database
 const dbManager = new DatabaseManager();
+
+// Middleware
+app.use(cors({ origin: true, credentials: false }));
+app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Configure multer for file uploads
+const storage = multer.memoryStorage();
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  }
+});
 
 // Initialize database connection
 dbManager.init().then(() => {
@@ -57,275 +40,147 @@ dbManager.init().then(() => {
   console.error('Failed to initialize database:', err);
 });
 
-// Create photos table if it doesn't exist (simplified without events)
-dbManager.db.run(`
-  CREATE TABLE IF NOT EXISTS photos (
-    id TEXT PRIMARY KEY,
-    filename TEXT,
-    watermark_path TEXT,
-    clean_path TEXT,
-    updated TEXT,
-    price REAL,
-    category TEXT
-  )
-`);
+// Create uploads directories if they don't exist
+const uploadsDir = path.join(__dirname, 'uploads');
+const cleanDir = path.join(uploadsDir, 'clean');
+const watermarkedDir = path.join(uploadsDir, 'watermarked');
 
-// Create orders table for payment tracking
-dbManager.db.run(`
-  CREATE TABLE IF NOT EXISTS orders (
-    id TEXT PRIMARY KEY,
-    photo_ids TEXT,
-    total_amount REAL,
-    status TEXT DEFAULT 'pending',
-    mypos_order_id TEXT,
-    created_at TEXT,
-    updated_at TEXT
-  )
-`);
+fs.ensureDirSync(uploadsDir);
+fs.ensureDirSync(cleanDir);
+fs.ensureDirSync(watermarkedDir);
 
-// Middleware
-app.use(cors({ origin: true, credentials: false }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: false })); // For myPOS notify
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-app.use('/api', express.json());
+// Load categories
+const categoriesPath = path.join(__dirname, 'categories.json');
+let categories = [];
 
-// Configure multer for file uploads
-const storage = multer.memoryStorage(); // Use memory storage to avoid temp files
-
-const upload = multer({ 
-  storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
-  fileFilter: (req, file, cb) => {
-    console.log('Processing file:', file.originalname, 'Type:', file.mimetype);
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed!'), false);
-    }
+try {
+  if (fs.existsSync(categoriesPath)) {
+    categories = JSON.parse(fs.readFileSync(categoriesPath, 'utf8'));
+  } else {
+    categories = ['nature', 'portrait', 'landscape', 'abstract', 'other'];
+    fs.writeFileSync(categoriesPath, JSON.stringify(categories, null, 2));
   }
-});
-
-// Helper function to get upload paths
-function getUploadPaths() {
-  const backendDir = __dirname; // Use current backend directory
-  return {
-    clean: path.join(backendDir, 'uploads', 'clean'),
-    watermarked: path.join(backendDir, 'uploads', 'watermarked')
-  };
+} catch (error) {
+  console.error('Error loading categories:', error);
+  categories = ['nature', 'portrait', 'landscape', 'abstract', 'other'];
 }
 
-// Watermarking function
-async function addWatermark(inputPath, outputPath, watermarkText = 'WaterMarked Preview') {
+// Function to create watermarked image with diagonal repeating watermarks
+async function createWatermarkedImage(inputBuffer, outputPath, watermarkText = 'Προστατευμένη Εικόνα') {
   try {
-    console.log(`Starting watermarking: ${inputPath} -> ${outputPath}`);
-    
-    // Get image metadata first
-    const metadata = await sharp(inputPath).metadata();
+    // Get image metadata
+    const metadata = await sharp(inputBuffer).metadata();
     const { width: originalWidth, height: originalHeight } = metadata;
     
-    console.log(`Original image dimensions: ${originalWidth}x${originalHeight}`);
+    // Calculate target dimensions for watermarked version
+    const targetWidth = 800;
+    const targetHeight = 600;
     
-    // Calculate target dimensions
-    const targetWidth = 1200;
-    const targetHeight = 800;
-    
-    // Calculate actual final dimensions while maintaining aspect ratio
+    // Calculate final dimensions while maintaining aspect ratio
     let finalWidth, finalHeight;
     const aspectRatio = originalWidth / originalHeight;
     
     if (aspectRatio > targetWidth / targetHeight) {
-      // Image is wider than target ratio
       finalWidth = targetWidth;
       finalHeight = Math.round(targetWidth / aspectRatio);
     } else {
-      // Image is taller than target ratio
       finalHeight = targetHeight;
       finalWidth = Math.round(targetHeight * aspectRatio);
     }
     
-    console.log(`Calculated final dimensions: ${finalWidth}x${finalHeight}`);
+    // Create a single watermark tile - adjust size based on image dimensions
+    const tileWidth = Math.max(80, Math.floor(finalWidth * 0.1)); // 10% of image width, minimum 80px
+    const tileHeight = Math.max(30, Math.floor(finalHeight * 0.05)); // 5% of image height, minimum 30px
     
-    // Calculate watermark size - make it significantly smaller than the image
-    const watermarkWidth = Math.floor(finalWidth * 0.95); // 95% of image width
-    const watermarkHeight = Math.floor(finalHeight * 0.12); // 12% of image height
-    
-    console.log(`Watermark dimensions: ${watermarkWidth}x${watermarkHeight}`);
-    
-    // Ensure watermark is smaller than image
-    if (watermarkWidth >= finalWidth || watermarkHeight >= finalHeight) {
-      throw new Error(`Watermark too large: ${watermarkWidth}x${watermarkHeight} vs image ${finalWidth}x${finalHeight}`);
-    }
-    
-    // Create watermark SVG
-    const watermarkSvg = `
-      <svg width="${watermarkWidth}" height="${watermarkHeight}" xmlns="http://www.w3.org/2000/svg">
-        <rect width="${watermarkWidth}" height="${watermarkHeight}" fill="rgba(0,0,0,0.8)"/>
-        <text x="${watermarkWidth/2}" y="${watermarkHeight * 0.6}" font-family="Arial, sans-serif" font-size="28" fill="white" text-anchor="middle" font-weight="bold">
+    // Create the main canvas SVG with diagonal repeating watermarks
+    // Make canvas exactly match the final image dimensions
+    const diagonalWatermarkSvg = `
+      <svg width="${finalWidth}" height="${finalHeight}" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="diagonalWatermark" patternUnits="userSpaceOnUse" width="${tileWidth * 2}" height="${tileHeight * 2}" patternTransform="rotate(45)">
+            <use href="#watermarkTile" x="0" y="0"/>
+            <use href="#watermarkTile" x="${tileWidth}" y="${tileHeight}"/>
+          </pattern>
+        </defs>
+        
+        <!-- Define the watermark tile -->
+        <g id="watermarkTile">
+          <text x="${tileWidth/2}" y="${tileHeight * 0.6}" font-family="Arial, sans-serif" font-size="${Math.max(8, Math.floor(tileHeight * 0.25))}" fill="white" text-anchor="middle" font-weight="bold">
           ${watermarkText}
         </text>
-        <text x="${watermarkWidth/2}" y="${watermarkHeight * 0.85}" font-family="Arial, sans-serif" font-size="18" fill="white" text-anchor="middle">
-          PREVIEW ONLY
+          <text x="${tileWidth/2}" y="${tileHeight * 0.85}" font-family="Arial, sans-serif" font-size="${Math.max(6, Math.floor(tileHeight * 0.2))}" fill="white" text-anchor="middle">
+            -------------------------
         </text>
+        </g>
+        
+        <!-- Fill the entire canvas with diagonal watermarks -->
+        <rect width="${finalWidth}" height="${finalHeight}" fill="url(#diagonalWatermark)"/>
       </svg>
     `;
     
-    console.log('SVG watermark created, starting image processing...');
-    
-    // Create watermark buffer
-    const watermarkBuffer = Buffer.from(watermarkSvg);
-    console.log('Watermark buffer created, size:', watermarkBuffer.length);
-    
-    // Calculate watermark position to center it
-    const watermarkTop = Math.floor(finalHeight * 0.60); // 60% from top
-    const watermarkLeft = Math.floor((finalWidth - watermarkWidth) / 2); // Center horizontally
-    
-    console.log(`Watermark position: top=${watermarkTop}, left=${watermarkLeft}`);
-    
-    // Process image: resize and add watermark in one pipeline
-    await sharp(inputPath)
+    // Create watermarked image with diagonal repeating watermarks
+    await sharp(inputBuffer)
       .resize(finalWidth, finalHeight, { fit: 'inside', withoutEnlargement: true })
       .composite([{
-        input: watermarkBuffer,
-        top: watermarkTop,
-        left: watermarkLeft
+        input: Buffer.from(diagonalWatermarkSvg),
+        top: 0, // Position at top-left corner (0,0)
+        left: 0
       }])
       .jpeg({ quality: 80 })
       .toFile(outputPath);
     
-    console.log(`✅ Watermark successfully added to: ${outputPath}`);
-    console.log(`Watermark spans ${watermarkWidth}px width (95% of image width)`);
-    
-    // Verify the file was created
-    const outputExists = fs.existsSync(outputPath);
-    const outputStats = outputExists ? fs.statSync(outputPath) : null;
-    console.log(`Output file exists: ${outputExists}, size: ${outputStats ? outputStats.size : 'N/A'} bytes`);
-    
+    console.log(`Diagonal watermarked image created: ${outputPath}`);
+    return true;
   } catch (error) {
-    console.error('❌ Watermarking error:', error);
-    console.error('Error stack:', error.stack);
-    
-    // Don't use fallback - throw error to see what's wrong
-    throw new Error(`Watermarking failed: ${error.message}`);
+    console.error('Error creating watermarked image:', error);
+    throw error;
   }
 }
 
-// Routes
+// ==================== PHOTO MANAGEMENT APIs ====================
 
-// API Helper - List all available endpoints
-app.get('/api/helper', (req, res) => {
+// GET /api/photos - Get all photos (watermarked for display)
+app.get('/api/photos', async (req, res) => {
   try {
-    const apiEndpoints = [
-      {
-        method: 'GET',
-        endpoint: '/api/helper',
-        description: 'List all available API endpoints (this endpoint)',
-        parameters: 'None',
-        response: 'JSON array of all API endpoints',
-        example: 'GET /api/helper'
-      },
-      {
-        method: 'GET',
-        endpoint: '/api/categories',
-        description: 'Get all available categories',
-        parameters: 'None',
-        response: 'JSON array of category names',
-        example: 'GET /api/categories'
-      },
-      {
-        method: 'POST',
-        endpoint: '/api/categories',
-        description: 'Create a new category',
-        parameters: 'JSON body: { "name": "category_name" }',
-        response: 'JSON with success message and category name',
-        example: 'POST /api/categories\nBody: { "name": "Wedding Photos" }'
-      },
-      {
-        method: 'DELETE',
-        endpoint: '/api/categories/:categoryName',
-        description: 'Delete a category and all its photos',
-        parameters: 'URL parameter: categoryName',
-        response: 'JSON with success message and deleted photo count',
-        example: 'DELETE /api/categories/Wedding%20Photos'
-      },
-      {
-        method: 'GET',
-        endpoint: '/api/photos',
-        description: 'Get all photos from database',
-        parameters: 'None',
-        response: 'JSON array of all photos with details',
-        example: 'GET /api/photos'
-      },
-      {
-        method: 'GET',
-        endpoint: '/api/photos/watermarked',
-        description: 'Get watermarked photos for gallery display',
-        parameters: 'Query: ?category=category_name (optional)',
-        response: 'JSON array of watermarked photos',
-        example: 'GET /api/photos/watermarked?category=Wedding%20Photos'
-      },
-      {
-        method: 'POST',
-        endpoint: '/api/photos/upload',
-        description: 'Upload and watermark multiple photos',
-        parameters: 'FormData: clean files + category',
-        response: 'JSON with upload results and counts',
-        example: 'POST /api/photos/upload\nFormData: clean files + category field'
-      },
-      {
-        method: 'DELETE',
-        endpoint: '/api/photos/delete',
-        description: 'Delete multiple photos by IDs',
-        parameters: 'JSON body: { "photoIds": ["id1", "id2"] }',
-        response: 'JSON with deletion results and counts',
-        example: 'DELETE /api/photos/delete\nBody: { "photoIds": ["abc123", "def456"] }'
-      },
-      {
-        method: 'GET',
-        endpoint: '/uploads/*',
-        description: 'Serve static files (watermarked/clean photos)',
-        parameters: 'File path in uploads directory',
-        response: 'Image file or 404 if not found',
-        example: 'GET /uploads/watermarked/1-abc123-watermark.jpg'
-      }
-    ];
-
-    const serverInfo = {
-      server: 'IMAGE BUY APP Backend',
-      version: '1.0.0',
-      description: 'Photo management system with watermarking and category organization',
-      totalEndpoints: apiEndpoints.length,
-      endpoints: apiEndpoints,
-      database: 'SQLite (photos.db)',
-      categories: 'JSON file (categories.json)',
-      uploads: 'uploads/clean and uploads/watermarked directories',
-      features: [
-        'Photo upload with automatic watermarking',
-        'Category-based organization',
-        'Batch operations (upload/delete)',
-        'Static file serving',
-        'SQLite database storage'
-      ]
-    };
-
-    res.json(serverInfo);
+    const photos = await dbManager.getWatermarkedPhotos();
+    res.json(photos);
   } catch (error) {
-    console.error('Error in API helper:', error);
-    res.status(500).json({ error: 'Failed to generate API helper' });
+    console.error('Error fetching photos:', error);
+    res.status(500).json({ error: 'Failed to fetch photos' });
   }
 });
 
-// Get available categories
+// GET /api/photos/:id - Get specific photo
+app.get('/api/photos/:id', async (req, res) => {
+  try {
+    const photo = await dbManager.getPhotoById(req.params.id);
+    if (!photo) {
+      return res.status(404).json({ error: 'Photo not found' });
+    }
+    res.json(photo);
+  } catch (error) {
+    console.error('Error fetching photo:', error);
+    res.status(500).json({ error: 'Failed to fetch photo' });
+  }
+});
+
+// GET /api/photos/category/:category - Get photos by category
+app.get('/api/photos/category/:category', async (req, res) => {
+  try {
+    const photos = await dbManager.getPhotosByCategory(req.params.category);
+    res.json(photos);
+  } catch (error) {
+    console.error('Error fetching photos by category:', error);
+    res.status(500).json({ error: 'Failed to fetch photos by category' });
+  }
+});
+
+// GET /api/categories - Get all categories
 app.get('/api/categories', (req, res) => {
-  try {
-    res.json(categories);
-  } catch (error) {
-    console.error('Error fetching categories:', error);
-    res.status(500).json({ error: 'Failed to fetch categories' });
-  }
+  res.json(categories);
 });
 
-// Create new category
+// POST /api/categories - Create new category
 app.post('/api/categories', (req, res) => {
   try {
     const { name } = req.body;
@@ -344,16 +199,8 @@ app.post('/api/categories', (req, res) => {
     // Add to memory array first
     categories.push(categoryName);
     
-    // Then write to file asynchronously to avoid blocking
-    fs.writeFile(categoriesPath, JSON.stringify(categories, null, 2), (err) => {
-      if (err) {
-        console.error('Error writing categories file:', err);
-        // Remove from memory if file write failed
-        categories = categories.filter(c => c !== categoryName);
-      } else {
-        console.log(`Categories file updated successfully`);
-      }
-    });
+    // Then write to file
+    fs.writeFileSync(categoriesPath, JSON.stringify(categories, null, 2));
     
     console.log(`New category created: ${categoryName}`);
     
@@ -368,7 +215,7 @@ app.post('/api/categories', (req, res) => {
   }
 });
 
-// Delete category
+// DELETE /api/categories/:categoryName - Delete category
 app.delete('/api/categories/:categoryName', async (req, res) => {
   try {
     const { categoryName } = req.params;
@@ -381,31 +228,16 @@ app.delete('/api/categories/:categoryName', async (req, res) => {
       return res.status(404).json({ error: 'Category not found' });
     }
     
-    // Count photos in this category before deletion using DatabaseManager
-    const photoCount = await dbManager.getPhotoCountByCategory(categoryName);
-    
-    // Delete all photos in this category from database using DatabaseManager
-    await dbManager.deletePhotosByCategory(categoryName);
-    
     // Remove category from memory array first
     categories = categories.filter(c => c !== categoryName);
     
-    // Then write to file asynchronously
-    fs.writeFile(categoriesPath, JSON.stringify(categories, null, 2), (err) => {
-      if (err) {
-        console.error('Error writing categories file:', err);
-        // Revert memory change if file write failed
-        categories.push(categoryName);
-      } else {
-        console.log(`Categories file updated successfully`);
-      }
-    });
+    // Then write to file
+    fs.writeFileSync(categoriesPath, JSON.stringify(categories, null, 2));
     
-    console.log(`Category '${categoryName}' deleted with ${photoCount} photos`);
+    console.log(`Category '${categoryName}' deleted successfully`);
     
     res.json({ 
-      message: `Category '${categoryName}' deleted successfully`,
-      deletedPhotos: photoCount
+      message: `Category '${categoryName}' deleted successfully`
     });
     
   } catch (error) {
@@ -414,705 +246,541 @@ app.delete('/api/categories/:categoryName', async (req, res) => {
   }
 });
 
-// Get all photos
-app.get('/api/photos', async (req, res) => {
+// POST /api/photos/upload - Upload new photo
+app.post('/api/photos/upload', upload.single('photo'), async (req, res) => {
   try {
-    const photos = await dbManager.getAllPhotos();
-    res.json(photos);
+    if (!req.file) {
+      return res.status(400).json({ error: 'No photo uploaded' });
+    }
+
+    const { price = 5.99, category = 'other' } = req.body;
+    const photoId = uuidv4();
+    const filename = req.file.originalname;
+    const extension = path.extname(filename);
+    const baseName = path.basename(filename, extension);
+
+    // Generate file paths
+    const cleanFileName = `${photoId}-${baseName}-clean${extension}`;
+    const watermarkedFileName = `${photoId}-${baseName}-watermark${extension}`;
+    
+    const cleanPath = path.join('clean', cleanFileName);
+    const watermarkedPath = path.join('watermarked', watermarkedFileName);
+    
+    const fullCleanPath = path.join(cleanDir, cleanFileName);
+    const fullWatermarkedPath = path.join(watermarkedDir, watermarkedFileName);
+
+    // Save clean version (original quality - no resizing or compression)
+    await sharp(req.file.buffer)
+      .toFile(fullCleanPath);
+
+    // Create watermarked version with high quality
+    await createWatermarkedImage(req.file.buffer, fullWatermarkedPath, 'Προστατευμένη Εικόνα');
+
+    // Save to database
+    const photoData = {
+      id: photoId,
+      filename,
+      path_to_clean: cleanPath,
+      path_to_watermark: watermarkedPath,
+      price: parseFloat(price),
+      category
+    };
+
+    await dbManager.addPhoto(photoData);
+
+    res.json({
+      message: 'Photo uploaded successfully',
+      photo: {
+        id: photoId,
+        filename,
+        path_to_watermark: watermarkedPath,
+        price: parseFloat(price),
+        category
+      }
+    });
+
   } catch (error) {
-    console.error('Error fetching photos:', error);
-    res.status(500).json({ error: 'Failed to fetch photos' });
+    console.error('Error uploading photo:', error);
+    console.error('Error details:', error.message);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ error: 'Failed to upload photo', details: error.message });
   }
 });
 
-// Get watermarked photos (for display in gallery)
-app.get('/api/photos/watermarked', async (req, res) => {
+// POST /api/photos/upload-multiple - Upload multiple photos
+app.post('/api/photos/upload-multiple', upload.array('photos', 10), async (req, res) => {
   try {
-    const { category } = req.query;
-    console.log('Fetching watermarked photos from database...');
-    console.log('Category filter:', category);
-    
-    let watermarkedPhotos;
-    
-    if (category) {
-      // Filter by category
-      watermarkedPhotos = await dbManager.getPhotosByCategory(category);
-      // Filter to only include photos with watermarks
-      watermarkedPhotos = watermarkedPhotos.filter(photo => photo.watermark_path);
-    } else {
-      // Get all photos
-      watermarkedPhotos = await dbManager.getAllPhotos();
-      // Filter to only include photos with watermarks
-      watermarkedPhotos = watermarkedPhotos.filter(photo => photo.watermark_path);
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No photos uploaded' });
     }
-    
-    console.log(`Found ${watermarkedPhotos.length} photos in database`);
-    
-    // Verify files exist and add full URLs
-    const verifiedPhotos = watermarkedPhotos.map(photo => {
-      // Map database columns to expected frontend format
-      const watermarkPath = photo.watermark_path || photo.path_to_watermark;
-      const cleanPath = photo.clean_path || photo.path_to_clean;
-      
-      const fullPath = path.join(__dirname, watermarkPath);
-      const fileExists = fs.existsSync(fullPath);
-      
-      console.log(`Photo ${photo.id}: ${watermarkPath} - Exists: ${fileExists}`);
-      
-      return {
-        ...photo,
-        path_to_watermark: `/${watermarkPath}`, // Add leading slash for proper URL
-        path_to_clean: cleanPath ? `/${cleanPath}` : null,
-        fileExists
-      };
-    });
-    
-    const existingPhotos = verifiedPhotos.filter(photo => photo.fileExists);
-    console.log(`Returning ${existingPhotos.length} verified watermarked photos`);
-    console.log('Sample photo data:', existingPhotos[0]);
-    
-    res.json(existingPhotos);
-  } catch (error) {
-    console.error('Error fetching watermarked photos:', error);
-    res.status(500).json({ error: 'Failed to fetch watermarked photos' });
-  }
-});
 
-// Function to scan existing watermarked photos and populate database
-async function scanExistingWatermarkedPhotos() {
-  try {
-    const uploadPaths = getUploadPaths();
-    const watermarkedDir = uploadPaths.watermarked;
-    
-    if (!fs.existsSync(watermarkedDir)) {
-      console.log('Watermarked directory does not exist');
-      return;
-    }
-    
-    const files = fs.readdirSync(watermarkedDir);
-    console.log(`Found ${files.length} files in watermarked directory:`, files);
-    
-    const imageFiles = files.filter(file => {
-      const filePath = path.join(watermarkedDir, file);
-      const stats = fs.statSync(filePath);
-      return stats.isFile() && /\.(jpg|jpeg|png|gif|webp)$/i.test(file);
-    });
-    
-    console.log(`Found ${imageFiles.length} image files:`, imageFiles);
-    
-         for (const [index, filename] of imageFiles.entries()) {
-       // Check if this photo is already in the database using DatabaseManager
-       const existingPhoto = await dbManager.getPhotosByCategory('event_photos'); // This is a simplified check
-      
-      if (!existingPhoto) {
-        // Extract photo number and ID from filename
-        // Expected format: "1-a1b2c3d4-watermark.jpg"
-        const match = filename.match(/^(\d+)-([a-f0-9]+)-watermark\.(.+)$/);
+    const { price = 5.99, category = 'other' } = req.body;
+    const results = [];
+
+    for (const file of req.files) {
+      try {
+        const photoId = uuidv4();
+        const filename = file.originalname;
+        const extension = path.extname(filename);
+        const baseName = path.basename(filename, extension);
+
+        // Generate file paths
+        const cleanFileName = `${photoId}-${baseName}-clean${extension}`;
+        const watermarkedFileName = `${photoId}-${baseName}-watermark${extension}`;
         
-        if (match) {
-          const photoNumber = parseInt(match[1]);
-          const photoId = match[2];
-          const extension = match[3];
-          
-          // Check if clean version exists
-          const cleanFilename = `${photoNumber}-${photoId}-clean.${extension}`;
-          const cleanPath = path.join(uploadPaths.clean, cleanFilename);
-          const hasCleanVersion = fs.existsSync(cleanPath);
-          
-          const photo = {
+        const cleanPath = path.join('clean', cleanFileName);
+        const watermarkedPath = path.join('watermarked', watermarkedFileName);
+        
+        const fullCleanPath = path.join(cleanDir, cleanFileName);
+        const fullWatermarkedPath = path.join(watermarkedDir, watermarkedFileName);
+
+        // Save clean version (original quality - no resizing or compression)
+        await sharp(file.buffer)
+          .toFile(fullCleanPath);
+
+        // Create watermarked version with high quality
+        await createWatermarkedImage(file.buffer, fullWatermarkedPath, 'Προστατευμένη Εικόνα');
+
+        // Save to database
+        const photoData = {
             id: photoId,
-            filename: `${photoNumber}-${photoId}-watermark.${extension}`,
-            watermark_path: `uploads/watermarked/${filename}`,
-            clean_path: hasCleanVersion ? `uploads/clean/${cleanFilename}` : null,
-            price: 5.99,
-            category: 'event_photos',
-            updated: new Date().toISOString()
-          };
-          
-                     const photoData = {
-             id: photo.id,
-             watermarkPath: photo.watermark_path,
-             cleanPath: photo.clean_path,
-             filename: photo.filename,
-             price: photo.price,
-             category: photo.category
-           };
+          filename,
+          path_to_clean: cleanPath,
+          path_to_watermark: watermarkedPath,
+          price: parseFloat(price),
+          category
+        };
+
            await dbManager.addPhoto(photoData);
-           console.log(`Added existing photo to database: ${photo.filename} (ID: ${photo.id})`);
-                 } else {
-           console.log(`Skipping file with unexpected format: ${filename}`);
-         }
-       }
-     }
-     
-     console.log(`Database now contains ${await dbManager.getTotalPhotoCount()} photos`);
-  } catch (error) {
-    console.error('Error scanning existing watermarked photos:', error);
-  }
-}
 
-// Get clean photos by IDs (for purchase/download)
-app.get('/api/photos/clean', async (req, res) => {
-  try {
-    const { ids } = req.query;
-    
-    if (!ids) {
-      return res.status(400).json({ error: 'Photo IDs are required' });
-    }
-    
-    // Parse IDs from query string (can be comma-separated or array)
-    const photoIds = Array.isArray(ids) ? ids : ids.split(',');
-    
-    console.log('Requested clean photos for IDs:', photoIds);
-    
-    // Get clean photos from database using DatabaseManager
-    const cleanPhotos = await dbManager.getCleanPhotosByIds(photoIds);
-    
-    if (cleanPhotos.length === 0) {
-      return res.status(404).json({ error: 'No photos found with the provided IDs' });
-    }
-    
-    console.log(`Returning ${cleanPhotos.length} clean photos from database`);
-    res.json(cleanPhotos);
-    
-  } catch (error) {
-    console.error('Error fetching clean photos:', error);
-    res.status(500).json({ error: 'Failed to fetch clean photos' });
-  }
-});
+        results.push({
+          id: photoId,
+          filename,
+          path_to_watermark: watermarkedPath,
+          price: parseFloat(price),
+          category,
+          status: 'success'
+        });
 
-// Manual scan of existing photos
-app.get('/api/photos/scan-existing', async (req, res) => {
-  try {
-    console.log('Manual scan of existing photos requested');
-    const beforeCount = await dbManager.getTotalPhotoCount();
-    await scanExistingWatermarkedPhotos();
-    const afterCount = await dbManager.getTotalPhotoCount();
-    const addedCount = afterCount - beforeCount;
-    
-    console.log(`Scan completed. Before: ${beforeCount}, After: ${afterCount}, Added: ${addedCount}`);
-    
-    res.json({ 
-      message: 'Scan completed successfully', 
-      beforeCount, 
-      afterCount, 
-      addedCount,
-      totalPhotos: afterCount
+  } catch (error) {
+        console.error(`Error processing photo ${file.originalname}:`, error);
+        results.push({
+          filename: file.originalname,
+          status: 'error',
+          error: error.message
+        });
+      }
+    }
+
+    const successCount = results.filter(r => r.status === 'success').length;
+    const errorCount = results.filter(r => r.status === 'error').length;
+
+    res.json({
+      message: `Multiple photos processed: ${successCount} successful, ${errorCount} failed`,
+      results,
+      summary: {
+        total: req.files.length,
+        successful: successCount,
+        failed: errorCount
+      }
     });
+
   } catch (error) {
-    console.error('Scan error:', error);
-    res.status(500).json({ error: 'Failed to scan existing photos' });
+    console.error('Error uploading multiple photos:', error);
+    res.status(500).json({ error: 'Failed to upload multiple photos', details: error.message });
   }
 });
 
-// Re-watermark existing photos
-app.post('/api/photos/re-watermark', async (req, res) => {
+// PUT /api/photos/:id - Update photo
+app.put('/api/photos/:id', async (req, res) => {
   try {
-    console.log('Re-watermarking existing photos requested');
+    const { price, category } = req.body;
+    const updates = {};
     
-         // Get all photos that have clean versions using DatabaseManager
-     const photos = await dbManager.getAllPhotos();
-     const photosWithClean = photos.filter(photo => photo.clean_path);
+    if (price !== undefined) updates.price = parseFloat(price);
+    if (category !== undefined) updates.category = category;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'No valid updates provided' });
+    }
+
+    const result = await dbManager.updatePhoto(req.params.id, updates);
     
-         console.log(`Found ${photosWithClean.length} photos to re-watermark`);
-     
+    if (result === 0) {
+      return res.status(404).json({ error: 'Photo not found' });
+    }
+
+    res.json({ message: 'Photo updated successfully' });
+  } catch (error) {
+    console.error('Error updating photo:', error);
+    res.status(500).json({ error: 'Failed to update photo' });
+  }
+});
+
+// DELETE /api/photos/:id - Delete photo (also supports multiple IDs via query parameter)
+app.delete('/api/photos/:id', async (req, res) => {
+  try {
+    const { multiple_ids } = req.query;
+    
+    // If multiple_ids query parameter is provided, handle bulk delete
+    if (multiple_ids) {
+      const photoIds = multiple_ids.split(',').map(id => id.trim());
+      console.log('Bulk delete via query parameter - Photo IDs:', photoIds);
+      
+      const results = [];
      let successCount = 0;
      let errorCount = 0;
      
-     for (const photo of photosWithClean) {
-      try {
-        // Get the clean file path
-                const cleanPath = path.join(__dirname, photo.clean_path);
-        const watermarkedPath = path.join(__dirname, photo.watermark_path);
-        
-        // Check if clean file exists
-        if (!fs.existsSync(cleanPath)) {
-          console.log(`Clean file not found for photo ${photo.id}: ${cleanPath}`);
+      for (const photoId of photoIds) {
+        try {
+          const photo = await dbManager.getPhotoById(photoId);
+          if (!photo) {
+            results.push({ id: photoId, status: 'error', error: 'Photo not found' });
+            errorCount++;
           continue;
         }
         
-        console.log(`Re-watermarking photo ${photo.id}: ${photo.filename}`);
-        
-        // Re-create watermarked version
-        await addWatermark(cleanPath, watermarkedPath, 'WaterMarked Preview');
-        
+          // Delete files
+          if (photo.path_to_clean) {
+            const fullCleanPath = path.join(__dirname, 'uploads', photo.path_to_clean);
+            if (fs.existsSync(fullCleanPath)) {
+              fs.unlinkSync(fullCleanPath);
+            }
+          }
+
+          if (photo.path_to_watermark) {
+            const fullWatermarkedPath = path.join(__dirname, 'uploads', photo.path_to_watermark);
+            if (fs.existsSync(fullWatermarkedPath)) {
+              fs.unlinkSync(fullWatermarkedPath);
+            }
+          }
+
+          // Delete from database
+          await dbManager.deletePhoto(photoId);
+
+          results.push({ id: photoId, status: 'success' });
         successCount++;
-        console.log(`✅ Successfully re-watermarked photo ${photo.id}`);
         
       } catch (error) {
+          console.error(`Error deleting photo ${photoId}:`, error);
+          results.push({ id: photoId, status: 'error', error: error.message });
         errorCount++;
-        console.error(`❌ Failed to re-watermark photo ${photo.id}:`, error.message);
+        }
+      }
+
+      return res.json({
+        message: `Bulk delete completed: ${successCount} successful, ${errorCount} failed`,
+        results,
+        summary: {
+          total: photoIds.length,
+          successful: successCount,
+          failed: errorCount
+        }
+      });
+    }
+
+    // Original single photo delete logic
+    const photo = await dbManager.getPhotoById(req.params.id);
+    if (!photo) {
+      return res.status(404).json({ error: 'Photo not found' });
+    }
+
+    // Delete files
+    if (photo.path_to_clean) {
+      const fullCleanPath = path.join(__dirname, 'uploads', photo.path_to_clean);
+      if (fs.existsSync(fullCleanPath)) {
+        fs.unlinkSync(fullCleanPath);
       }
     }
-    
-         console.log(`Re-watermarking completed. Success: ${successCount}, Errors: ${errorCount}`);
-     
-     res.json({ 
-       message: 'Re-watermarking completed', 
-       totalPhotos: photosWithClean.length,
-       successCount,
-       errorCount
-     });
-    
+
+    if (photo.path_to_watermark) {
+      const fullWatermarkedPath = path.join(__dirname, 'uploads', photo.path_to_watermark);
+      if (fs.existsSync(fullWatermarkedPath)) {
+        fs.unlinkSync(fullWatermarkedPath);
+      }
+    }
+
+    // Delete from database
+    await dbManager.deletePhoto(req.params.id);
+
+    res.json({ message: 'Photo deleted successfully' });
   } catch (error) {
-    console.error('Re-watermarking error:', error);
-    res.status(500).json({ error: 'Failed to re-watermark photos' });
+    console.error('Error deleting photo:', error);
+    res.status(500).json({ error: 'Failed to delete photo' });
   }
 });
 
-// Delete photos (admin only)
-app.delete('/api/photos/delete', async (req, res) => {
+// DELETE /api/photos/bulk - Delete multiple photos
+app.delete('/api/photos/bulk', async (req, res) => {
   try {
-    const { photoIds } = req.body;
+    const { photo_ids } = req.body;
     
-    if (!photoIds || !Array.isArray(photoIds) || photoIds.length === 0) {
-      return res.status(400).json({ 
-        error: 'Photo IDs array is required and must not be empty' 
-      });
+    console.log('Bulk delete request body:', req.body);
+    console.log('Photo IDs received:', photo_ids);
+    console.log('Photo IDs type:', typeof photo_ids);
+    console.log('Photo IDs is array:', Array.isArray(photo_ids));
+    
+    if (!photo_ids || !Array.isArray(photo_ids) || photo_ids.length === 0) {
+      console.log('Validation failed - photo_ids:', photo_ids);
+      return res.status(400).json({ error: 'photo_ids array is required' });
     }
-    
-    console.log(`Delete request received for ${photoIds.length} photos:`, photoIds);
-    
-    // Get photo details from database using DatabaseManager
-    const photosToDelete = await dbManager.getCleanPhotosByIds(photoIds);
-    
-    if (photosToDelete.length === 0) {
-      return res.status(404).json({ error: 'No photos found with the provided IDs' });
-    }
-    
-    console.log(`Found ${photosToDelete.length} photos to delete`);
-    
+
+    const results = [];
     let successCount = 0;
     let errorCount = 0;
-    const errors = [];
-    const deletedFiles = [];
-    
-    for (const photo of photosToDelete) {
+
+    for (const photoId of photo_ids) {
+      console.log(`Processing photo ID: ${photoId} (type: ${typeof photoId})`);
       try {
-        console.log(`\n--- Deleting photo: ${photo.filename} (ID: ${photo.id}) ---`);
+        const photo = await dbManager.getPhotoById(photoId);
+        console.log(`Photo lookup result for ${photoId}:`, photo ? 'Found' : 'Not found');
         
-        // Delete watermarked file
-        if (photo.watermark_path) {
-          const watermarkedPath = path.join(__dirname, photo.watermark_path);
-          if (fs.existsSync(watermarkedPath)) {
-            fs.unlinkSync(watermarkedPath);
-            deletedFiles.push(`Watermarked: ${photo.watermark_path}`);
-            console.log(`✅ Deleted watermarked file: ${photo.watermark_path}`);
-          } else {
-            console.log(`⚠️ Watermarked file not found: ${watermarkedPath}`);
+        if (!photo) {
+          results.push({ id: photoId, status: 'error', error: 'Photo not found' });
+          errorCount++;
+          continue;
+        }
+
+        // Delete files
+        if (photo.path_to_clean) {
+          const fullCleanPath = path.join(__dirname, 'uploads', photo.path_to_clean);
+          if (fs.existsSync(fullCleanPath)) {
+            fs.unlinkSync(fullCleanPath);
           }
         }
-        
-        // Delete clean file
-        if (photo.clean_path) {
-          const cleanPath = path.join(__dirname, photo.clean_path);
-          if (fs.existsSync(cleanPath)) {
-            fs.unlinkSync(cleanPath);
-            console.log(`✅ Deleted clean file: ${photo.clean_path}`);
-          } else {
-            console.log(`⚠️ Clean file not found: ${cleanPath}`);
+
+        if (photo.path_to_watermark) {
+          const fullWatermarkedPath = path.join(__dirname, 'uploads', photo.path_to_watermark);
+          if (fs.existsSync(fullWatermarkedPath)) {
+            fs.unlinkSync(fullWatermarkedPath);
           }
         }
-        
-        // Delete from database using DatabaseManager
-        await dbManager.deletePhoto(photo.id);
-        console.log(`✅ Deleted from database: ${photo.id}`);
-        
+
+        // Delete from database
+        await dbManager.deletePhoto(photoId);
+
+        results.push({ id: photoId, status: 'success' });
         successCount++;
-        console.log(`✅ Photo ${photo.filename} deleted successfully`);
         
       } catch (error) {
+        console.error(`Error deleting photo ${photoId}:`, error);
+        results.push({ id: photoId, status: 'error', error: error.message });
         errorCount++;
-        const errorMsg = `Failed to delete photo ${photo.filename} (${photo.id}): ${error.message}`;
-        errors.push(errorMsg);
-        console.error(`❌ ${errorMsg}`);
-        console.error('Error details:', error);
-      }
-    }
-    
-    console.log(`\n--- Deletion Summary ---`);
-    console.log(`Total photos requested: ${photoIds.length}`);
-    console.log(`Successfully deleted: ${successCount}`);
-    console.log(`Failed: ${errorCount}`);
-    console.log(`Files deleted: ${deletedFiles.length}`);
-    
-    if (errors.length > 0) {
-      console.log('Errors encountered:');
-      errors.forEach(error => console.log(`- ${error}`));
-    }
-    
-    const totalPhotosInDB = await dbManager.getTotalPhotoCount();
-    console.log(`Remaining photos in database: ${totalPhotosInDB}`);
-    
-    if (errorCount === 0) {
-      res.json({ 
-        message: `All ${successCount} photos deleted successfully!`, 
-        deletedCount: successCount,
-        deletedFiles: deletedFiles
-      });
-    } else {
-      res.json({ 
-        message: `${successCount} photos deleted successfully, ${errorCount} failed.`, 
-        deletedCount: successCount,
-        failedCount: errorCount,
-        deletedFiles: deletedFiles,
-        errors: errors,
-        partial: true
-      });
-    }
-    
-  } catch (error) {
-    console.error('Delete photos error:', error);
-    res.status(500).json({ error: `Failed to delete photos: ${error.message}` });
-  }
-});
-
-// Upload photos (admin only) - simplified for categories only
-app.post('/api/photos/upload', upload.fields([
-  { name: 'clean', maxCount: 100 }
-]), async (req, res) => {
-  try {
-    console.log('Upload request received');
-    console.log('Files:', req.files);
-    console.log('Body:', req.body);
-    
-    const cleanFiles = req.files.clean || [];
-    const category = req.body.category || 'general';
-    
-    console.log('Clean files count:', cleanFiles.length);
-    console.log('Category for ALL photos:', category);
-    console.log('=== ALL PHOTOS WILL USE THE SAME CATEGORY ===');
-    
-    if (cleanFiles.length === 0) {
-      return res.status(400).json({ 
-        error: 'Clean photos are required',
-        cleanCount: cleanFiles.length
-      });
-    }
-    
-    console.log('Processing photos and adding watermarks...');
-    
-    let successCount = 0;
-    let errorCount = 0;
-    const errors = [];
-    
-    for (let i = 0; i < cleanFiles.length; i++) {
-      try {
-        const cleanFile = cleanFiles[i];
-        console.log(`\n--- Processing photo ${i + 1}/${cleanFiles.length}: ${cleanFile.originalname} ---`);
-        console.log(`📸 Photo ${i + 1} will be assigned to category: "${category}"`);
-        
-        const photoNumber = await dbManager.getTotalPhotoCount() + 1; // Sequential numbering starting from 1
-        const fullUuid = uuidv4();
-        const shortId = fullUuid.split('-')[0]; // Use first 8 characters of UUID
-        
-        // Get upload paths (simple structure)
-        const uploadPaths = getUploadPaths();
-        
-        // Create structured filenames
-        const cleanFilename = `${photoNumber}-${shortId}-clean${path.extname(cleanFile.originalname)}`;
-        const watermarkedFilename = `${photoNumber}-${shortId}-watermark${path.extname(cleanFile.originalname)}`;
-        
-        const cleanPath = path.join(uploadPaths.clean, cleanFilename);
-        const watermarkedPath = path.join(uploadPaths.watermarked, watermarkedFilename);
-        
-        console.log(`Clean filename: ${cleanFilename}`);
-        console.log(`Watermarked filename: ${watermarkedFilename}`);
-        console.log(`Upload paths:`, uploadPaths);
-        console.log(`🎯 Category for this photo: "${category}" (same for all photos)`);
-        
-        // Ensure directories exist
-        fs.ensureDirSync(uploadPaths.clean);
-        fs.ensureDirSync(uploadPaths.watermarked);
-        
-        // Save the clean file with new name (from memory buffer)
-        await fs.writeFile(cleanPath, cleanFile.buffer);
-        console.log('Clean file saved successfully');
-        
-        // Add watermark to create watermarked version
-        console.log('Starting watermarking process...');
-        await addWatermark(cleanPath, watermarkedPath, 'WaterMarked Preview');
-        console.log('Watermarking completed successfully');
-        
-        // Create photo record with category only using DatabaseManager
-        const photoData = {
-          id: shortId,
-          watermarkPath: `uploads/watermarked/${watermarkedFilename}`,
-          cleanPath: `uploads/clean/${cleanFilename}`,
-          filename: watermarkedFilename,
-          price: 5.99,
-          category: category
-        };
-        await dbManager.addPhoto(photoData);
-        console.log(`✅ Photo added to database with category: "${category}"`);
-        
-        successCount++;
-        console.log(`✅ Photo ${i + 1} completed successfully: ${cleanFile.originalname} (ID: ${shortId}) - Category: "${category}"`);
-        
-      } catch (error) {
-        errorCount++;
-        const errorMsg = `Photo ${i + 1} (${cleanFiles[i].originalname}): ${error.message}`;
-        errors.push(errorMsg);
-        console.error(`❌ ${errorMsg}`);
-        console.error('Error details:', error);
-        
-        // Continue processing other photos instead of stopping
-        console.log('Continuing with next photo...');
-      }
-    }
-    
-    console.log(`\n--- Upload Summary ---`);
-    console.log(`Total photos: ${cleanFiles.length}`);
-    console.log(`Successful: ${successCount}`);
-    console.log(`Failed: ${errorCount}`);
-    console.log(`🎯 ALL photos were assigned to category: "${category}"`);
-    
-    if (errors.length > 0) {
-      console.log('Errors encountered:');
-      errors.forEach(error => console.log(`- ${error}`));
-    }
-    
-    const totalPhotosInDB = await dbManager.getTotalPhotoCount();
-    console.log(`Total photos in database: ${totalPhotosInDB}`);
-    
-    if (errorCount === 0) {
-      res.json({ 
-        message: `All ${successCount} photos uploaded and watermarked successfully!`, 
-        count: successCount,
-        category: category
-      });
-    } else {
-      res.json({ 
-        message: `${successCount} photos uploaded successfully, ${errorCount} failed.`, 
-        count: successCount,
-        errors: errors,
-        category: category,
-        partial: true
-      });
-      }
-    
-  } catch (error) {
-    console.error('Upload error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ─────────────────────────────────────────────────────────
-// myPOS Payment Functions
-// ─────────────────────────────────────────────────────────
-
-// Βοηθητικό: φτιάχνει το canonical string που θα υπογράψουμε
-function buildCanonical(params) {
-  // 1) πετάμε το 'signature'
-  const entries = Object.entries(params).filter(([k]) => k.toLowerCase() !== "signature");
-
-  // 2) ταξινόμηση αλφαβητικά με βάση το key
-  entries.sort(([a], [b]) => a.localeCompare(b));
-
-  // 3) join ως key=value με & (χωρίς επιπλέον spaces)
-  // (αν κάποια τιμή έχει & ή = άφησέ τη raw, το myPOS SDK περιμένει raw values)
-  return entries.map(([k, v]) => `${k}=${v}`).join("&");
-}
-
-// ─────────────────────────────────────────────────────────
-// 1) Υπογραφή για Embedded Checkout
-// Frontend: POST /mypos/sign με το αντικείμενο παραμέτρων ΧΩΡΙΣ signature
-// Επιστρέφουμε { signature }
-app.post("/mypos/sign", (req, res) => {
-  try {
-    if (!MYPOS_PRIVATE_KEY_PEM) {
-      return res.status(503).json({ error: "mypos_not_configured" });
-    }
-
-    const params = req.body || {};
-    const canonical = buildCanonical(params);
-
-    const signer = crypto.createSign("RSA-SHA256");
-    signer.update(Buffer.from(canonical, "utf8"));
-    const signature = signer.sign(MYPOS_PRIVATE_KEY_PEM, "base64");
-
-    return res.json({ signature });
-  } catch (err) {
-    console.error("sign error:", err);
-    return res.status(500).json({ error: "sign_failed" });
-  }
-});
-
-// ─────────────────────────────────────────────────────────
-// 2) Notify URL από myPOS (ΠΡΕΠΕΙ να είναι https/public στο sandbox/live)
-// myPOS απαιτεί: απάντηση 200 με body ακριβώς "OK"
-app.post("/mypos/notify", (req, res) => {
-  try {
-    // Τα πεδία έρχονται form-url-encoded στο req.body
-    console.log(" myPOS notify payload:", req.body);
-
-    // (Προαιρετικά) verify signature του notify:
-    // Αν το payload περιέχει 'signature', φτιάχνεις canonical και επαληθεύεις:
-    if (MYPOS_PUBLIC_CERT_PEM && req.body && req.body.signature) {
-      const { signature, ...rest } = req.body;
-      const canonical = buildCanonical(rest);
-      const verifier = crypto.createVerify("RSA-SHA256");
-      verifier.update(Buffer.from(canonical, "utf8"));
-      const isValid = verifier.verify(MYPOS_PUBLIC_CERT_PEM, signature, "base64");
-      if (!isValid) {
-        console.warn(" notify signature INVALID");
-        // Δεν απαντάμε με error για να μη ξανα-χτυπάει αέναα, απλά log
-      } else {
-        console.log(" notify signature OK");
       }
     }
 
-    // Update order status based on myPOS response
-    if (req.body && req.body.orderId) {
-      const orderId = req.body.orderId;
-      const status = req.body.status || 'unknown';
-      
-             // Update order in database - using direct sqlite3 for now
-       dbManager.db.run('UPDATE orders SET status = ?, updated_at = ? WHERE mypos_order_id = ?', [status, new Date().toISOString(), orderId], (err) => {
-         if (err) {
-           console.error('Error updating order status:', err);
-         }
-       });
-      
-      console.log(` Order ${orderId} status updated to: ${status}`);
-    }
+    console.log('Bulk delete completed. Results:', results);
 
-    // Απάντηση που απαιτείται από myPOS:
-    return res.status(200).send("OK");
-  } catch (err) {
-    console.error("notify error:", err);
-    // Παρόλα αυτά προτείνεται να απαντήσεις "OK" για να μη γίνει retry storm
-    return res.status(200).send("OK");
-  }
-});
-
-// ─────────────────────────────────────────────────────────
-// 3) Create order for photos (before payment)
-app.post("/api/orders", (req, res) => {
-  try {
-    const { photoIds, totalAmount } = req.body;
-    
-    if (!photoIds || !Array.isArray(photoIds) || photoIds.length === 0) {
-      return res.status(400).json({ error: 'Photo IDs array is required' });
-    }
-    
-    if (!totalAmount || totalAmount <= 0) {
-      return res.status(400).json({ error: 'Valid total amount is required' });
-    }
-    
-    const orderId = uuidv4();
-    const currentDate = new Date().toISOString();
-    
-         // Create order in database - using direct sqlite3 for now
-     dbManager.db.run('INSERT INTO orders (id, photo_ids, total_amount, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)', 
-       [orderId, JSON.stringify(photoIds), totalAmount, 'pending', currentDate, currentDate], (err) => {
-         if (err) {
-           console.error('Error creating order:', err);
-         }
-       });
-    
-    console.log(`Order created: ${orderId} for ${photoIds.length} photos, total: €${totalAmount}`);
-    
-    res.json({ 
-      orderId,
-      message: 'Order created successfully',
-      totalAmount,
-      photoCount: photoIds.length
+      res.json({ 
+      message: `Bulk delete completed: ${successCount} successful, ${errorCount} failed`,
+      results,
+      summary: {
+        total: photo_ids.length,
+        successful: successCount,
+        failed: errorCount
+      }
     });
     
+  } catch (error) {
+    console.error('Error in bulk delete:', error);
+    res.status(500).json({ error: 'Failed to perform bulk delete' });
+  }
+});
+
+// ==================== ORDER MANAGEMENT APIs ====================
+
+// POST /api/orders - Create new order
+app.post('/api/orders', async (req, res) => {
+  try {
+    const { photo_ids, total_amount, email, status = 'pending', mypos_order_id } = req.body;
+    
+    if (!photo_ids || !total_amount || !email) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: photo_ids, total_amount, email' 
+      });
+    }
+
+    const orderId = uuidv4();
+    const orderData = {
+      id: orderId,
+      photo_ids: Array.isArray(photo_ids) ? photo_ids.join(',') : photo_ids,
+      total_amount: parseFloat(total_amount),
+      email,
+      status: status || 'pending',
+      mypos_order_id: mypos_order_id || null
+    };
+
+    await dbManager.createOrder(orderData);
+
+    res.json({
+      message: 'Order created successfully',
+      order: {
+        id: orderId,
+        photo_ids: orderData.photo_ids,
+        total_amount: orderData.total_amount,
+        email,
+        status: orderData.status,
+        mypos_order_id: orderData.mypos_order_id
+      }
+    });
+
   } catch (error) {
     console.error('Error creating order:', error);
     res.status(500).json({ error: 'Failed to create order' });
   }
 });
 
-// ─────────────────────────────────────────────────────────
-// 4) Get order status
-app.get("/api/orders/:orderId", (req, res) => {
+// GET /api/orders/:id - Get order by ID
+app.get('/api/orders/:id', async (req, res) => {
   try {
-    const { orderId } = req.params;
-    
-         // Get order from database - using direct sqlite3 for now
-     dbManager.db.get('SELECT * FROM orders WHERE id = ?', [orderId], (err, order) => {
-       if (err) {
-         console.error('Error fetching order:', err);
-         return res.status(500).json({ error: 'Failed to fetch order' });
-       }
-       
-       if (!order) {
-         return res.status(404).json({ error: 'Order not found' });
-       }
-       
-       // Parse photo IDs back to array
-       order.photo_ids = JSON.parse(order.photo_ids);
-       
-              res.json(order);
-     });
-    
+    const order = await dbManager.getOrderById(req.params.id);
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+    res.json(order);
   } catch (error) {
     console.error('Error fetching order:', error);
     res.status(500).json({ error: 'Failed to fetch order' });
   }
 });
 
-// ─────────────────────────────────────────────────────────
-// 5) Get all available categories
-app.get("/api/categories", async (req, res) => {
+// GET /api/orders - Get all orders
+app.get('/api/orders', async (req, res) => {
   try {
-    // Get unique categories from photos table using DatabaseManager
-    const dbCategories = await dbManager.getAllCategories();
-    const categories = dbCategories.map(row => row.category);
-    
-    // Also include categories from the categories.json file
-    const categoriesFromFile = [...categories];
-    if (fs.existsSync(categoriesPath)) {
-      try {
-        const fileCategories = JSON.parse(fs.readFileSync(categoriesPath, 'utf8'));
-        fileCategories.forEach(cat => {
-          if (!categoriesFromFile.includes(cat)) {
-            categoriesFromFile.push(cat);
-          }
-        });
-      } catch (error) {
-        console.error('Error reading categories.json:', error);
-      }
-    }
-    
-    res.json(categoriesFromFile);
+    const orders = await dbManager.getAllOrders();
+    res.json(orders);
   } catch (error) {
-    console.error('Error fetching categories:', error);
-    res.status(500).json({ error: 'Failed to fetch categories' });
+    console.error('Error fetching orders:', error);
+    res.status(500).json({ error: 'Failed to fetch orders' });
   }
 });
 
-// ─────────────────────────────────────────────────────────
-// 6) Health check endpoint
-app.get("/health", (_req, res) => res.json({ ok: true }));
+// PUT /api/orders/:id - Update order
+app.put('/api/orders/:id', async (req, res) => {
+  try {
+    const { status, mypos_order_id, email, photo_ids, total_amount } = req.body;
+    
+    if (!status && !mypos_order_id && !email && !photo_ids && !total_amount) {
+      return res.status(400).json({ error: 'At least one field to update is required' });
+    }
 
-// Backend API only - no frontend serving
+    const updates = {};
+    if (status !== undefined) updates.status = status;
+    if (mypos_order_id !== undefined) updates.mypos_order_id = mypos_order_id;
+    if (email !== undefined) updates.email = email;
+    if (photo_ids !== undefined) updates.photo_ids = Array.isArray(photo_ids) ? photo_ids.join(',') : photo_ids;
+    if (total_amount !== undefined) updates.total_amount = parseFloat(total_amount);
+
+    const result = await dbManager.updateOrder(req.params.id, updates);
+    
+    if (result === 0) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    res.json({ message: 'Order updated successfully' });
+  } catch (error) {
+    console.error('Error updating order:', error);
+    res.status(500).json({ error: 'Failed to update order' });
+  }
+});
+
+// PUT /api/orders/:id/status - Update order status
+app.put('/api/orders/:id/status', async (req, res) => {
+  try {
+    const { status, mypos_order_id } = req.body;
+    
+    if (!status) {
+      return res.status(400).json({ error: 'Status is required' });
+    }
+
+    const result = await dbManager.updateOrderStatus(req.params.id, status, mypos_order_id);
+    
+    if (result === 0) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    res.json({ message: 'Order status updated successfully' });
+  } catch (error) {
+    console.error('Error updating order status:', error);
+    res.status(500).json({ error: 'Failed to update order status' });
+  }
+});
+
+// DELETE /api/orders/:id - Delete order
+app.delete('/api/orders/:id', async (req, res) => {
+  try {
+    const result = await dbManager.deleteOrder(req.params.id);
+    
+    if (result === 0) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    res.json({ message: 'Order deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting order:', error);
+    res.status(500).json({ error: 'Failed to delete order' });
+  }
+});
+
+// ==================== UTILITY APIs ====================
+
+// GET /api/health - Health check
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    database: dbManager.db ? 'connected' : 'disconnected'
+  });
+});
+
+// GET /api/stats - Get basic statistics
+app.get('/api/stats', async (req, res) => {
+  try {
+    const photos = await dbManager.getAllPhotos();
+    const orders = await dbManager.getAllOrders();
+    
+    const stats = {
+      total_photos: photos.length,
+      total_orders: orders.length,
+      pending_orders: orders.filter(o => o.status === 'pending').length,
+      completed_orders: orders.filter(o => o.status === 'completed').length,
+      categories: categories.length
+    };
+    
+    res.json(stats);
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+    res.status(500).json({ error: 'Failed to fetch statistics' });
+  }
+});
 
 // Error handling middleware
 app.use((error, req, res, next) => {
-  console.error('Global error:', error);
-  console.error('Error stack:', error.stack);
-  
-  if (error instanceof multer.MulterError) {
-    if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ error: 'File too large. Maximum size is 50MB.' });
-    }
-    if (error.code === 'LIMIT_FILE_COUNT') {
-      return res.status(400).json({ error: 'Too many files. Maximum is 100 files per type.' });
-    }
-    return res.status(400).json({ error: `Upload error: ${error.message}` });
-  }
-  
-  res.status(500).json({ error: error.message || 'Something went wrong!' });
+  console.error('Unhandled error:', error);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({ error: 'Endpoint not found' });
+});
+
+// Start server
 app.listen(PORT, () => {
-  console.log(` Server running on port ${PORT}`);
-  console.log(` Photo upload directory: ${path.join(__dirname, 'uploads')}`);
-  console.log(` myPOS payment endpoints: ${MYPOS_PRIVATE_KEY_PEM ? 'ENABLED' : 'DISABLED'}`);
-  console.log(` Health check: http://localhost:${PORT}/health`);
-  console.log(` API helper: http://localhost:${PORT}/api/helper`);
+  console.log(`Server running on port ${PORT}`);
+  console.log(`API available at http://localhost:${PORT}/api`);
+  console.log(`Uploads available at http://localhost:${PORT}/uploads`);
+});
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('\nShutting down gracefully...');
+  await dbManager.close();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('\nShutting down gracefully...');
+  await dbManager.close();
+  process.exit(0);
 });

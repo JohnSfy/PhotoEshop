@@ -1,0 +1,751 @@
+ <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Buy App - API Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .button-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .button {
+            padding: 15px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        .upload-btn { background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%); }
+        .delete-btn { background: linear-gradient(135deg, #f44336 0%, #da190b 100%); }
+        .order-btn { background: linear-gradient(135deg, #2196F3 0%, #0b7dda 100%); }
+        .category-btn { background: linear-gradient(135deg, #ff9800 0%, #e68900 100%); }
+        .form-section {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+        }
+        .form-section h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        .input-group input, .input-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .file-input {
+            margin-bottom: 15px;
+        }
+        .file-input input[type="file"] {
+            padding: 10px;
+            border: 2px dashed #ddd;
+            border-radius: 4px;
+            width: 100%;
+            background: #fafafa;
+        }
+        .results {
+            background: #f0f8ff;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+            border-left: 4px solid #2196F3;
+        }
+        .results h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        #status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        #resultData {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .quick-test {
+            margin-top: 30px;
+            padding: 20px;
+            background: #e8f5e8;
+            border-radius: 8px;
+            border: 1px solid #c3e6cb;
+        }
+        .quick-test h3 {
+            margin-top: 0;
+            color: #155724;
+        }
+        .quick-test .button {
+            margin: 5px;
+            padding: 10px 15px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🖼️ Image Buy App - API Test</h1>
+        
+        <div class="button-group">
+            <button class="button upload-btn" onclick="showUploadForm()">📤 Upload Photo</button>
+            <button class="button upload-multiple-btn" onclick="showUploadMultipleForm()">📤📤 Upload Multiple</button>
+            <button class="button delete-btn" onclick="showDeleteForm()">🗑️ Delete Photo and bulk(correct)</button>
+            <button class="button bulk-delete-btn" onclick="showBulkDeleteForm()">🗑️🗑️ Bulk Delete (not working)</button>
+            <button class="button order-btn" onclick="showOrderForm()">📋 Create Order</button>
+            <button class="button update-order-btn" onclick="showUpdateOrderForm()">✏️ Update Order</button>
+            <button class="button category-btn" onclick="showCategoryForm()">🏷️ Create Category</button>
+            <button class="button delete-category-btn" onclick="showDeleteCategoryForm()">❌ Delete Category</button>
+        </div>
+
+        <!-- Upload Photo Form -->
+        <div id="uploadForm" style="display: none;" class="form-section">
+            <h3>📤 Upload Single Photo</h3>
+            <div class="file-input">
+                <input type="file" id="photoFile" accept="image/*" required>
+            </div>
+            <div class="input-group">
+                <label for="photoPrice">Price:</label>
+                <input type="number" id="photoPrice" step="0.01" value="9.99" min="0">
+            </div>
+            <div class="input-group">
+                <label for="photoCategory">Category:</label>
+                <select id="photoCategory">
+                    <option value="nature">Nature</option>
+                    <option value="portrait">Portrait</option>
+                    <option value="landscape">Landscape</option>
+                    <option value="abstract">Abstract</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <button class="button upload-btn" onclick="uploadPhoto()">Upload Photo</button>
+        </div>
+
+        <!-- Upload Multiple Photos Form -->
+        <div id="uploadMultipleForm" style="display: none;" class="form-section">
+            <h3>📤 Upload Multiple Photos</h3>
+            <div class="file-input">
+                <input type="file" id="multiplePhotoFiles" accept="image/*" multiple required>
+            </div>
+            <div class="input-group">
+                <label for="multiplePhotoPrices">Prices (comma-separated):</label>
+                <input type="text" id="multiplePhotoPrices" placeholder="9.99,14.99,19.99">
+            </div>
+            <div class="input-group">
+                <label for="multiplePhotoCategories">Categories (comma-separated):</label>
+                <input type="text" id="multiplePhotoCategories" placeholder="nature,portrait,landscape">
+            </div>
+            <button class="button upload-btn" onclick="uploadMultiplePhotos()">Upload Multiple Photos</button>
+        </div>
+
+        <!-- Delete Photo Form -->
+        <div id="deleteForm" style="display: none;" class="form-section">
+            <h3>🗑️ Delete Photo(s)</h3>
+            <div class="input-group">
+                <label for="deletePhotoId">Photo ID(s) - Single ID or comma-separated for multiple:</label>
+                <input type="text" id="deletePhotoId" placeholder="photo-id-here OR photo1,photo2,photo3">
+            </div>
+            <button class="button delete-btn" onclick="deletePhoto()">Delete Photo(s)</button>
+        </div>
+
+        <!-- Bulk Delete Photos Form -->
+        <div id="bulkDeleteForm" style="display: none;" class="form-section">
+            <h3>🗑️ Bulk Delete Photos</h3>
+            <div class="input-group">
+                <label for="bulkDeletePhotoIds">Photo IDs (comma-separated):</label>
+                <input type="text" id="bulkDeletePhotoIds" placeholder="photo1,photo2,photo3">
+            </div>
+            <button class="button delete-btn" onclick="bulkDeletePhotos()">Bulk Delete Photos</button>
+        </div>
+
+        <!-- Order Form -->
+        <div id="orderForm" class="form-container" style="display: none;">
+            <h3>📋 Create Order</h3>
+            <form onsubmit="createOrder(event)">
+                <div class="form-group">
+                    <label for="orderPhotoIds">Photo IDs (comma-separated):</label>
+                    <input type="text" id="orderPhotoIds" required placeholder="photo1,photo2,photo3">
+                </div>
+                <div class="form-group">
+                    <label for="orderTotalAmount">Total Amount:</label>
+                    <input type="number" id="orderTotalAmount" step="0.01" required placeholder="29.99">
+                </div>
+                <div class="form-group">
+                    <label for="orderEmail">Email:</label>
+                    <input type="email" id="orderEmail" required placeholder="customer@example.com">
+                </div>
+                <div class="form-group">
+                    <label for="orderStatus">Status:</label>
+                    <select id="orderStatus">
+                        <option value="pending">Pending</option>
+                        <option value="processing">Processing</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="orderMyposId">MyPOS Order ID:</label>
+                    <input type="text" id="orderMyposId" placeholder="MP123456789">
+                </div>
+                <div class="form-buttons">
+                    <button type="submit" class="button">Create Order</button>
+                    <button type="button" class="button secondary" onclick="hideOrderForm()">Cancel</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Update Order Form -->
+        <div id="updateOrderForm" class="form-container" style="display: none;">
+            <h3>✏️ Update Order</h3>
+            <form onsubmit="updateOrder(event)">
+                <div class="form-group">
+                    <label for="updateOrderId">Order ID:</label>
+                    <input type="text" id="updateOrderId" required>
+                </div>
+                <div class="form-group">
+                    <label for="updateOrderStatus">Status:</label>
+                    <select id="updateOrderStatus">
+                        <option value="">-- Select Status --</option>
+                        <option value="pending">Pending</option>
+                        <option value="processing">Processing</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                        <option value="refunded">Refunded</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="updateOrderMyposId">MyPOS Order ID:</label>
+                    <input type="text" id="updateOrderMyposId" placeholder="MP123456789">
+                </div>
+                <div class="form-group">
+                    <label for="updateOrderEmail">Email:</label>
+                    <input type="email" id="updateOrderEmail" placeholder="customer@example.com">
+                </div>
+                <div class="form-group">
+                    <label for="updateOrderPhotoIds">Photo IDs (comma-separated):</label>
+                    <input type="text" id="updateOrderPhotoIds" placeholder="photo1,photo2,photo3">
+                </div>
+                <div class="form-group">
+                    <label for="updateOrderTotalAmount">Total Amount:</label>
+                    <input type="number" id="updateOrderTotalAmount" step="0.01" placeholder="29.99">
+                </div>
+                <div class="form-buttons">
+                    <button type="submit" class="button">Update Order</button>
+                    <button type="button" class="button secondary" onclick="hideUpdateOrderForm()">Cancel</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Create Category Form -->
+        <div id="categoryForm" style="display: none;" class="form-section">
+            <h3>🏷️ Create Category</h3>
+            <div class="input-group">
+                <label for="categoryName">Category Name:</label>
+                <input type="text" id="categoryName" placeholder="new-category-name">
+            </div>
+            <button class="button category-btn" onclick="createCategory()">Create Category</button>
+        </div>
+
+        <!-- Delete Category Form -->
+        <div id="deleteCategoryForm" style="display: none;" class="form-section">
+            <h3>❌ Delete Category</h3>
+            <div class="input-group">
+                <label for="deleteCategoryName">Category Name:</label>
+                <input type="text" id="deleteCategoryName" placeholder="category-to-delete">
+            </div>
+            <button class="button delete-btn" onclick="deleteCategory()">Delete Category</button>
+        </div>
+
+        <div id="results" class="results" style="display: none;">
+            <h3>📊 Results</h3>
+            <div id="status"></div>
+            <pre id="resultData"></pre>
+        </div>
+
+        <div class="quick-test">
+            <h3>🧪 Quick Test Buttons</h3>
+            <button class="button" onclick="testHealth()">Health Check</button>
+            <button class="button" onclick="testCategories()">Get Categories</button>
+            <button class="button" onclick="testPhotos()">Get Photos</button>
+            <button class="button" onclick="testOrders()">Get Orders</button>
+            <button class="button" onclick="testStats()">Get Stats</button>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000/api';
+
+        function showUploadForm() {
+            hideAllForms();
+            document.getElementById('uploadForm').style.display = 'block';
+        }
+
+        function showUploadMultipleForm() {
+            hideAllForms();
+            document.getElementById('uploadMultipleForm').style.display = 'block';
+        }
+
+        function showDeleteForm() {
+            hideAllForms();
+            document.getElementById('deleteForm').style.display = 'block';
+        }
+
+        function showBulkDeleteForm() {
+            hideAllForms();
+            document.getElementById('bulkDeleteForm').style.display = 'block';
+        }
+
+        function showOrderForm() {
+            hideAllForms();
+            document.getElementById('orderForm').style.display = 'block';
+        }
+
+        function showUpdateOrderForm() {
+            hideAllForms();
+            document.getElementById('updateOrderForm').style.display = 'block';
+        }
+
+        function showCategoryForm() {
+            hideAllForms();
+            document.getElementById('categoryForm').style.display = 'block';
+        }
+
+        function showDeleteCategoryForm() {
+            hideAllForms();
+            document.getElementById('deleteCategoryForm').style.display = 'block';
+        }
+
+        function hideOrderForm() {
+            document.getElementById('orderForm').style.display = 'none';
+        }
+
+        function hideUpdateOrderForm() {
+            document.getElementById('updateOrderForm').style.display = 'none';
+        }
+
+        function hideAllForms() {
+            const forms = ['uploadForm', 'uploadMultipleForm', 'deleteForm', 'bulkDeleteForm', 'orderForm', 'updateOrderForm', 'categoryForm', 'deleteCategoryForm'];
+            forms.forEach(form => {
+                document.getElementById(form).style.display = 'none';
+            });
+        }
+
+        async function uploadPhoto() {
+            const file = document.getElementById('photoFile').files[0];
+            const price = document.getElementById('photoPrice').value;
+            const category = document.getElementById('photoCategory').value;
+
+            if (!file) {
+                showResult('Please select a photo file', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('photo', file);
+            formData.append('price', price);
+            formData.append('category', category);
+
+            try {
+                const response = await fetch(`${API_BASE}/photos/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResult('Photo uploaded successfully!', 'success', result);
+                } else {
+                    showResult('Upload failed', 'error', result);
+                }
+            } catch (error) {
+                showResult('Upload error: ' + error.message, 'error');
+            }
+        }
+
+        async function uploadMultiplePhotos() {
+            const files = document.getElementById('multiplePhotoFiles').files;
+            const prices = document.getElementById('multiplePhotoPrices').value.split(',').map(p => p.trim());
+            const categories = document.getElementById('multiplePhotoCategories').value.split(',').map(c => c.trim());
+
+            if (files.length === 0) {
+                showResult('Please select at least one photo file', 'error');
+                return;
+            }
+            if (prices.length !== files.length) {
+                showResult('Please provide a price for each selected photo', 'error');
+                return;
+            }
+            if (categories.length !== files.length) {
+                showResult('Please provide a category for each selected photo', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+                formData.append('photos', files[i]);
+                formData.append('prices', prices[i]);
+                formData.append('categories', categories[i]);
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/photos/upload-multiple`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResult('Multiple photos uploaded successfully!', 'success', result);
+                } else {
+                    showResult('Multiple upload failed', 'error', result);
+                }
+            } catch (error) {
+                showResult('Multiple upload error: ' + error.message, 'error');
+            }
+        }
+
+        async function deletePhoto() {
+            const photoIdsInput = document.getElementById('deletePhotoId').value;
+            const photoIdsArray = photoIdsInput.split(',').map(id => id.trim());
+
+            if (photoIdsArray.length === 0) {
+                showResult('Please enter at least one photo ID to delete', 'error');
+                return;
+            }
+
+            try {
+                if (photoIdsArray.length === 1) {
+                    // Single photo delete
+                    const response = await fetch(`${API_BASE}/photos/${photoIdsArray[0]}`, {
+                        method: 'DELETE'
+                    });
+
+                    const result = await response.json();
+                    
+                    if (response.ok) {
+                        showResult('Photo deleted successfully!', 'success', result);
+                    } else {
+                        showResult('Delete failed', 'error', result);
+                    }
+                } else {
+                    // Multiple photos delete using query parameter
+                    const multipleIds = photoIdsArray.join(',');
+                    const response = await fetch(`${API_BASE}/photos/bulk?multiple_ids=${encodeURIComponent(multipleIds)}`, {
+                        method: 'DELETE'
+                    });
+
+                    const result = await response.json();
+                    
+                    if (response.ok) {
+                        showResult('Photos deleted successfully!', 'success', result);
+                    } else {
+                        showResult('Bulk delete failed', 'error', result);
+                    }
+                }
+            } catch (error) {
+                showResult('Delete error: ' + error.message, 'error');
+            }
+        }
+
+        async function bulkDeletePhotos() {
+            const photoIds = document.getElementById('bulkDeletePhotoIds').value;
+            
+            console.log('Frontend - photoIds input value:', photoIds);
+            console.log('Frontend - photoIds type:', typeof photoIds);
+            
+            if (!photoIds) {
+                showResult('Please enter photo IDs to delete (comma-separated)', 'error');
+                return;
+            }
+
+            const photoIdsArray = photoIds.split(',').map(id => id.trim());
+            console.log('Frontend - photoIdsArray:', photoIdsArray);
+            console.log('Frontend - photoIdsArray type:', typeof photoIdsArray);
+            console.log('Frontend - photoIdsArray is array:', Array.isArray(photoIdsArray));
+
+            try {
+                const requestBody = { photo_ids: photoIdsArray };
+                console.log('Frontend - request body being sent:', requestBody);
+                
+                const response = await fetch(`${API_BASE}/photos/bulk`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResult('Photos deleted successfully!', 'success', result);
+                } else {
+                    showResult('Bulk delete failed', 'error', result);
+                }
+            } catch (error) {
+                showResult('Bulk delete error: ' + error.message, 'error');
+            }
+        }
+
+        async function createOrder(event) {
+            event.preventDefault();
+            const photoIds = document.getElementById('orderPhotoIds').value;
+            const totalAmount = document.getElementById('orderTotalAmount').value;
+            const email = document.getElementById('orderEmail').value;
+            const status = document.getElementById('orderStatus').value;
+            const myposId = document.getElementById('orderMyposId').value;
+
+            if (!photoIds || !totalAmount || !email || !status) {
+                showResult('Please fill all required fields', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/orders`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        photo_ids: photoIds.split(',').map(id => id.trim()),
+                        total_amount: parseFloat(totalAmount),
+                        email: email,
+                        status: status,
+                        mypos_order_id: myposId
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResult('Order created successfully!', 'success', result);
+                } else {
+                    showResult('Order creation failed', 'error', result);
+                }
+            } catch (error) {
+                showResult('Order creation error: ' + error.message, 'error');
+            }
+        }
+
+        async function updateOrder(event) {
+            event.preventDefault();
+            const orderId = document.getElementById('updateOrderId').value;
+            const status = document.getElementById('updateOrderStatus').value;
+            const myposId = document.getElementById('updateOrderMyposId').value;
+            const email = document.getElementById('updateOrderEmail').value;
+            const photoIds = document.getElementById('updateOrderPhotoIds').value;
+            const totalAmount = document.getElementById('updateOrderTotalAmount').value;
+
+            if (!orderId || !status) {
+                showResult('Please select an order ID and a status', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/orders/${orderId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        status: status,
+                        mypos_order_id: myposId,
+                        email: email,
+                        photo_ids: photoIds ? photoIds.split(',').map(id => id.trim()) : undefined,
+                        total_amount: totalAmount ? parseFloat(totalAmount) : undefined
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResult('Order updated successfully!', 'success', result);
+                } else {
+                    showResult('Order update failed', 'error', result);
+                }
+            } catch (error) {
+                showResult('Order update error: ' + error.message, 'error');
+            }
+        }
+
+        async function createCategory() {
+            const categoryName = document.getElementById('categoryName').value;
+            
+            if (!categoryName) {
+                showResult('Please enter a category name', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/categories`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ name: categoryName })
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResult('Category created successfully!', 'success', result);
+                } else {
+                    showResult('Category creation failed', 'error', result);
+                }
+            } catch (error) {
+                showResult('Category creation error: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteCategory() {
+            const categoryName = document.getElementById('deleteCategoryName').value;
+            
+            if (!categoryName) {
+                showResult('Please enter a category name to delete', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/categories/${encodeURIComponent(categoryName)}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResult('Category deleted successfully!', 'success', result);
+                } else {
+                    showResult('Category deletion failed', 'error', result);
+                }
+            } catch (error) {
+                showResult('Category deletion error: ' + error.message, 'error');
+            }
+        }
+
+        // Quick Test Functions
+        async function testHealth() {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const result = await response.json();
+                showResult('Health check completed', response.ok ? 'success' : 'error', result);
+            } catch (error) {
+                showResult('Health check error: ' + error.message, 'error');
+            }
+        }
+
+        async function testCategories() {
+            try {
+                const response = await fetch(`${API_BASE}/categories`);
+                const result = await response.json();
+                showResult('Categories retrieved', response.ok ? 'success' : 'error', result);
+            } catch (error) {
+                showResult('Categories error: ' + error.message, 'error');
+            }
+        }
+
+        async function testPhotos() {
+            try {
+                const response = await fetch(`${API_BASE}/photos`);
+                const result = await response.json();
+                showResult('Photos retrieved', response.ok ? 'success' : 'error', result);
+            } catch (error) {
+                showResult('Photos error: ' + error.message, 'error');
+            }
+        }
+
+        async function testOrders() {
+            try {
+                const response = await fetch(`${API_BASE}/orders`);
+                const result = await response.json();
+                showResult('Orders retrieved', response.ok ? 'success' : 'error', result);
+            } catch (error) {
+                showResult('Orders error: ' + error.message, 'error');
+            }
+        }
+
+        async function testStats() {
+            try {
+                const response = await fetch(`${API_BASE}/stats`);
+                const result = await response.json();
+                showResult('Stats retrieved', response.ok ? 'success' : 'error', result);
+            } catch (error) {
+                showResult('Stats error: ' + error.message, 'error');
+            }
+        }
+
+        function showResult(message, type, data = null) {
+            const resultsDiv = document.getElementById('results');
+            const statusDiv = document.getElementById('status');
+            const resultDataDiv = document.getElementById('resultData');
+
+            statusDiv.textContent = message;
+            statusDiv.className = type;
+            
+            if (data) {
+                resultDataDiv.textContent = JSON.stringify(data, null, 2);
+            } else {
+                resultDataDiv.textContent = '';
+            }
+
+            resultsDiv.style.display = 'block';
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Image Buy App API Test loaded');
+            console.log('API Base URL:', API_BASE);
+        });
+    </script>
+</body>
+</html>

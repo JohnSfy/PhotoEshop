@@ -1,88 +1,225 @@
-# Image Buy App - Backend API
+# Image Buy App Backend
 
-This is the backend API for the Image Buy App, designed to be deployed independently on Render.com.
+A clean, focused backend API for an image buying application.
 
 ## Features
 
-- **Photo Management**: Upload, watermark, and organize photos by categories
-- **Payment Integration**: myPOS payment gateway integration
-- **Database**: SQLite database for storing photo metadata and orders
-- **File Storage**: Local file storage for watermarked and clean photos
-- **RESTful API**: Complete REST API for all operations
+- Photo upload with automatic watermarking
+- Photo management (CRUD operations)
+- Order management with email support
+- Category-based photo organization
+- SQLite database storage
+- RESTful API design
+
+## Database Schema
+
+### Photos Table
+```sql
+CREATE TABLE photos (
+  id TEXT PRIMARY KEY,
+  filename TEXT,
+  path_to_watermark TEXT,
+  path_to_clean TEXT,
+  updated TEXT,
+  price REAL,
+  category TEXT
+)
+```
+
+### Orders Table
+```sql
+CREATE TABLE orders (
+  id TEXT PRIMARY KEY,
+  photo_ids TEXT,
+  total_amount REAL,
+  status TEXT DEFAULT 'pending',
+  mypos_order_id TEXT,
+  email TEXT,
+  created_at TEXT,
+  updated_at TEXT
+)
+```
+
+## Installation
+
+1. Install dependencies:
+```bash
+npm install
+```
+
+2. Setup database:
+```bash
+npm run setup-db
+```
+
+3. Start the server:
+```bash
+npm start
+```
+
+For development with auto-reload:
+```bash
+npm run dev
+```
 
 ## API Endpoints
 
-### Health Check
-- `GET /health` - Server health status
+### Photo Management
 
-### Categories
-- `GET /api/categories` - Get all categories
-- `POST /api/categories` - Create new category
-- `DELETE /api/categories/:name` - Delete category
+#### GET /api/photos
+Get all watermarked photos for display.
 
-### Photos
-- `GET /api/photos` - Get all photos
-- `GET /api/photos/watermarked` - Get watermarked photos for gallery
-- `GET /api/photos/clean` - Get clean photos by IDs
-- `POST /api/photos/upload` - Upload and watermark photos
-- `DELETE /api/photos/delete` - Delete photos
-- `GET /api/photos/scan-existing` - Scan existing photos
-- `POST /api/photos/re-watermark` - Re-watermark existing photos
+**Response:**
+```json
+[
+  {
+    "id": "uuid",
+    "path_to_watermark": "watermarked/filename.jpg",
+    "filename": "original-name.jpg",
+    "price": 9.99,
+    "updated": "2024-01-01T00:00:00.000Z",
+    "category": "nature"
+  }
+]
+```
 
-### Orders
-- `POST /api/orders` - Create new order
-- `GET /api/orders/:id` - Get order status
+#### GET /api/photos/:id
+Get a specific photo by ID.
 
-### Payment (myPOS)
-- `POST /mypos/sign` - Sign payment parameters
-- `POST /mypos/notify` - Payment notification webhook
+#### GET /api/photos/category/:category
+Get photos by category.
 
-### Static Files
-- `GET /uploads/*` - Serve photo files
+#### POST /api/photos/upload
+Upload a new photo with automatic watermarking.
 
-## Environment Variables
+**Request:** FormData with `photo` file and optional `price` and `category` fields.
 
-- `PORT` - Server port (default: 5000)
-- `NODE_ENV` - Environment (production/development)
-- `MYPOS_PRIVATE_KEY_PEM` - myPOS private key for payment signing
-- `MYPOS_PUBLIC_CERT_PEM` - myPOS public certificate for verification
+**Response:**
+```json
+{
+  "message": "Photo uploaded successfully",
+  "photo": {
+    "id": "uuid",
+    "filename": "original-name.jpg",
+    "path_to_watermark": "watermarked/filename.jpg",
+    "price": 9.99,
+    "category": "nature"
+  }
+}
+```
 
-## Database
+#### PUT /api/photos/:id
+Update photo details (price, category).
 
-The app uses SQLite with the following tables:
-- `photos` - Photo metadata and file paths
-- `orders` - Order tracking and payment status
+**Request Body:**
+```json
+{
+  "price": 12.99,
+  "category": "portrait"
+}
+```
+
+#### DELETE /api/photos/:id
+Delete a photo and its files.
+
+### Order Management
+
+#### POST /api/orders
+Create a new order.
+
+**Request Body:**
+```json
+{
+  "photo_ids": ["uuid1", "uuid2"],
+  "total_amount": 19.98,
+  "email": "customer@example.com"
+}
+```
+
+**Response:**
+```json
+{
+  "message": "Order created successfully",
+  "order": {
+    "id": "order-uuid",
+    "photo_ids": "uuid1,uuid2",
+    "total_amount": 19.98,
+    "email": "customer@example.com",
+    "status": "pending"
+  }
+}
+```
+
+#### GET /api/orders
+Get all orders.
+
+#### GET /api/orders/:id
+Get a specific order by ID.
+
+#### PUT /api/orders/:id/status
+Update order status.
+
+**Request Body:**
+```json
+{
+  "status": "completed",
+  "mypos_order_id": "payment-123"
+}
+```
+
+#### DELETE /api/orders/:id
+Delete an order.
+
+### Utility Endpoints
+
+#### GET /api/health
+Health check endpoint.
+
+#### GET /api/categories
+Get all available categories.
+
+#### GET /api/stats
+Get basic statistics about photos and orders.
 
 ## File Structure
 
 ```
-uploads/
-├── clean/          # Original clean photos
-└── watermarked/    # Watermarked preview photos
+backend/
+├── server.js              # Main server file
+├── package.json           # Dependencies
+├── database/
+│   ├── dbManager.js      # Database operations
+│   ├── setup.js          # Database setup
+│   └── photos.db         # SQLite database
+├── uploads/
+│   ├── clean/            # Original photos
+│   └── watermarked/      # Watermarked previews
+├── categories.json        # Available categories
+└── test-apis.js          # API testing script
 ```
 
-## Deployment
+## Testing
 
-This backend is configured for deployment on Render.com as a web service.
+Run the test script to verify all API endpoints:
 
-### Build Command
 ```bash
-cd backend && npm install
+npm test
 ```
 
-### Start Command
-```bash
-cd backend && npm start
+This will test all the main API endpoints and show you the results.
+
+## Environment Variables
+
+Create a `.env` file in the backend directory:
+
+```env
+PORT=5000
 ```
-
-## API Documentation
-
-Visit `/api/helper` endpoint for complete API documentation and examples.
 
 ## Notes
 
-- This is a backend-only deployment
-- Frontend should be deployed separately or accessed from a different domain
-- CORS is configured to allow all origins for API access
-- File uploads are limited to 50MB per file
-- Supports JPG, JPEG, PNG, GIF, and WebP image formats
+- Photos are automatically watermarked when uploaded
+- Clean versions are stored separately for purchase
+- Orders include email addresses for customer contact
+- All file operations are handled automatically
+- Database is automatically initialized on startup

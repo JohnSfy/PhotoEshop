@@ -59,7 +59,7 @@ class DatabaseManager {
       this.db.all(`
         SELECT 
           id,
-          watermark_path,
+          path_to_watermark,
           filename,
           price,
           updated,
@@ -82,7 +82,7 @@ class DatabaseManager {
       this.db.all(`
         SELECT 
           id,
-          clean_path,
+          path_to_clean,
           filename,
           price,
           updated,
@@ -100,46 +100,29 @@ class DatabaseManager {
   // Add new photo
   addPhoto(photoData) {
     return new Promise((resolve, reject) => {
+      const { id, filename, path_to_watermark, path_to_clean, price, category } = photoData;
+      const updated = new Date().toISOString();
+      
       this.db.run(`
-        INSERT INTO photos (
-          id, watermark_path, clean_path, filename, price, category
-        ) VALUES (?, ?, ?, ?, ?, ?)
-      `, [
-        photoData.id,
-        photoData.watermarkPath,
-        photoData.cleanPath,
-        photoData.filename,
-        photoData.price,
-        photoData.category || 'other'
-      ], function(err) {
+        INSERT INTO photos (id, filename, path_to_watermark, path_to_clean, updated, price, category)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `, [id, filename, path_to_watermark, path_to_clean, updated, price, category], function(err) {
         if (err) reject(err);
         else resolve(this.lastID);
       });
     });
   }
 
-  // Update photo category
-  updatePhotoCategory(photoId, category) {
+  // Update photo
+  updatePhoto(id, updates) {
     return new Promise((resolve, reject) => {
+      const fields = Object.keys(updates);
+      const values = Object.values(updates);
+      const setClause = fields.map(field => `${field} = ?`).join(', ');
+      
       this.db.run(`
-        UPDATE photos 
-        SET category = ?, updated = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `, [category, photoId], function(err) {
-        if (err) reject(err);
-        else resolve(this.changes);
-      });
-    });
-  }
-
-  // Update photo price
-  updatePhotoPrice(photoId, price) {
-    return new Promise((resolve, reject) => {
-      this.db.run(`
-        UPDATE photos 
-        SET price = ?, updated = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `, [price, photoId], function(err) {
+        UPDATE photos SET ${setClause}, updated = ? WHERE id = ?
+      `, [...values, new Date().toISOString(), id], function(err) {
         if (err) reject(err);
         else resolve(this.changes);
       });
@@ -147,13 +130,27 @@ class DatabaseManager {
   }
 
   // Delete photo
-  deletePhoto(photoId) {
+  deletePhoto(id) {
     return new Promise((resolve, reject) => {
-      this.db.run(`
-        DELETE FROM photos WHERE id = ?
-      `, [photoId], function(err) {
+      this.db.run('DELETE FROM photos WHERE id = ?', [id], function(err) {
         if (err) reject(err);
         else resolve(this.changes);
+      });
+    });
+  }
+
+  // Get photo by ID
+  getPhotoById(id) {
+    console.log(`getPhotoById called with ID: ${id} (type: ${typeof id})`);
+    return new Promise((resolve, reject) => {
+      this.db.get('SELECT * FROM photos WHERE id = ?', [id], (err, row) => {
+        if (err) {
+          console.error(`Database error in getPhotoById for ID ${id}:`, err);
+          reject(err);
+        } else {
+          console.log(`Database result for ID ${id}:`, row ? 'Found' : 'Not found');
+          resolve(row);
+        }
       });
     });
   }
@@ -161,86 +158,122 @@ class DatabaseManager {
   // Get photos by category
   getPhotosByCategory(category) {
     return new Promise((resolve, reject) => {
-      this.db.all(`
-        SELECT * FROM photos WHERE category = ? ORDER BY updated DESC
-      `, [category], (err, rows) => {
+      this.db.all('SELECT * FROM photos WHERE category = ? ORDER BY updated DESC', [category], (err, rows) => {
         if (err) reject(err);
         else resolve(rows);
       });
     });
   }
 
-  // Get all categories
-  getAllCategories() {
+  // ORDER OPERATIONS
+
+  // Create new order
+  createOrder(orderData) {
     return new Promise((resolve, reject) => {
-      this.db.all(`
-        SELECT DISTINCT category FROM photos WHERE category IS NOT NULL ORDER BY category
-      `, (err, rows) => {
+      const { id, photo_ids, total_amount, email, mypos_order_id } = orderData;
+      const now = new Date().toISOString();
+      
+      this.db.run(`
+        INSERT INTO orders (id, photo_ids, total_amount, status, mypos_order_id, email, created_at, updated_at)
+        VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)
+      `, [id, photo_ids, total_amount, mypos_order_id, email, now, now], function(err) {
+        if (err) reject(err);
+        else resolve(this.lastID);
+      });
+    });
+  }
+
+  // Get order by ID
+  getOrderById(id) {
+    return new Promise((resolve, reject) => {
+      this.db.get('SELECT * FROM orders WHERE id = ?', [id], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+  }
+
+  // Update order status
+  updateOrderStatus(id, status, mypos_order_id = null) {
+    return new Promise((resolve, reject) => {
+      const now = new Date().toISOString();
+      let query, params;
+      
+      if (mypos_order_id) {
+        query = 'UPDATE orders SET status = ?, mypos_order_id = ?, updated_at = ? WHERE id = ?';
+        params = [status, mypos_order_id, now, id];
+      } else {
+        query = 'UPDATE orders SET status = ?, updated_at = ? WHERE id = ?';
+        params = [status, now, id];
+      }
+      
+      this.db.run(query, params, function(err) {
+        if (err) reject(err);
+        else resolve(this.changes);
+      });
+    });
+  }
+
+  // Update order (any field)
+  updateOrder(id, updates) {
+    return new Promise((resolve, reject) => {
+      const now = new Date().toISOString();
+      const updateFields = [];
+      const params = [];
+      
+      // Build dynamic update query
+      Object.keys(updates).forEach(key => {
+        if (updates[key] !== undefined && updates[key] !== null) {
+          updateFields.push(`${key} = ?`);
+          params.push(updates[key]);
+        }
+      });
+      
+      if (updateFields.length === 0) {
+        resolve(0);
+        return;
+      }
+      
+      // Add updated_at timestamp
+      updateFields.push('updated_at = ?');
+      params.push(now);
+      
+      // Add WHERE clause
+      params.push(id);
+      
+      const query = `UPDATE orders SET ${updateFields.join(', ')} WHERE id = ?`;
+      
+      this.db.run(query, params, function(err) {
+        if (err) reject(err);
+        else resolve(this.changes);
+      });
+    });
+  }
+
+  // Get all orders
+  getAllOrders() {
+    return new Promise((resolve, reject) => {
+      this.db.all('SELECT * FROM orders ORDER BY created_at DESC', (err, rows) => {
         if (err) reject(err);
         else resolve(rows);
       });
     });
   }
 
-  // Search photos
-  searchPhotos(query, category = null) {
-    let sql = `SELECT * FROM photos WHERE filename LIKE ?`;
-    const params = [`%${query}%`];
-    
-    if (category) {
-      sql += ` AND category = ?`;
-      params.push(category);
-    }
-    
-    sql += ` ORDER BY updated DESC`;
-    
+  // Get orders by status
+  getOrdersByStatus(status) {
     return new Promise((resolve, reject) => {
-      this.db.all(sql, params, (err, rows) => {
+      this.db.all('SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC', [status], (err, rows) => {
         if (err) reject(err);
         else resolve(rows);
       });
     });
   }
 
-  // Get photo count by category
-  getPhotoCountByCategory() {
+  // Delete order
+  deleteOrder(id) {
     return new Promise((resolve, reject) => {
-      this.db.all(`
-        SELECT category, COUNT(*) as count
-        FROM photos 
-        GROUP BY category 
-        ORDER BY count DESC
-      `, (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows);
-      });
-    });
-  }
-
-  // Get total photo count
-  getTotalPhotoCount() {
-    return new Promise((resolve, reject) => {
-      this.db.get('SELECT COUNT(*) as count FROM photos', (err, row) => {
-        if (err) reject(err);
-        else resolve(row ? row.count : 0);
-      });
-    });
-  }
-
-  // Get photo count by category
-  getPhotoCountByCategory(category) {
-    return new Promise((resolve, reject) => {
-      this.db.get('SELECT COUNT(*) as count FROM photos WHERE category = ?', [category], (err, row) => {
-        if (err) reject(err);
-        else resolve(row ? row.count : 0);
-      });
-    });
-  }
-
-  // Delete photos by category
-  deletePhotosByCategory(category) {
-    return new Promise((resolve, reject) => {
-      this.db.run('DELETE FROM photos WHERE category = ?', [category], function(err) {
+      this.db.run('DELETE FROM orders WHERE id = ?', [id], function(err) {
         if (err) reject(err);
         else resolve(this.changes);
       });
