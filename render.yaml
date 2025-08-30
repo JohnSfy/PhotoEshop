@@ -11,7 +11,6 @@ services:
     startCommand: |
       cd backend
       npm start
-    healthCheckPath: /api/health
     autoDeploy: true
     branch: main
     
@@ -19,7 +18,7 @@ services:
     disk:
       name: uploads-disk
       mountPath: /opt/render/project/src/backend/uploads
-      sizeGB: 10
+      sizeGB: 1
     
     # Environment variables
     envVars:
