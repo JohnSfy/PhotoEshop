@@ -34,6 +34,30 @@ const dbManager = new DatabaseManager();
 
 // Middleware
 app.set("trust proxy", true);
+
+// Request logging middleware
+app.use((req, res, next) => {
+  const timestamp = new Date().toISOString();
+  const method = req.method;
+  const url = req.url;
+  const userAgent = req.get('User-Agent') || 'Unknown';
+  const ip = req.ip || req.connection.remoteAddress || 'Unknown';
+  
+  console.log(`[${timestamp}] ${method} ${url} - IP: ${ip} - User-Agent: ${userAgent}`);
+  
+  // Log request body for POST/PUT requests (except file uploads)
+  if ((method === 'POST' || method === 'PUT') && req.body && Object.keys(req.body).length > 0) {
+    console.log(`[${timestamp}] Request Body:`, JSON.stringify(req.body, null, 2));
+  }
+  
+  // Log query parameters
+  if (req.query && Object.keys(req.query).length > 0) {
+    console.log(`[${timestamp}] Query Params:`, JSON.stringify(req.query, null, 2));
+  }
+  
+  next();
+});
+
 // myPOS notify έρχεται ως application/x-www-form-urlencoded
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
@@ -270,11 +294,16 @@ async function createWatermarkedImage(inputBuffer, outputPath, watermarkText = '
 
 // GET /api/photos - Get all photos (watermarked for display)
 app.get('/api/photos', async (req, res) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] 📸 GET /api/photos - Fetching all photos`);
+  
   try {
     const photos = await dbManager.getWatermarkedPhotos();
+    console.log(`[${timestamp}] ✅ GET /api/photos - Retrieved ${photos.length} photos`);
     res.json(photos);
   } catch (error) {
-    console.error('Error fetching photos:', error);
+    console.error(`[${timestamp}] ❌ GET /api/photos - Error:`, error.message);
+    console.error(`[${timestamp}] ❌ GET /api/photos - Stack:`, error.stack);
     res.status(500).json({ error: 'Failed to fetch photos' });
   }
 });
@@ -377,19 +406,31 @@ app.delete('/api/categories/:categoryName', async (req, res) => {
 
 // POST /api/photos/upload - Upload new photo
 app.post('/api/photos/upload', upload.single('photo'), async (req, res) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] 📤 POST /api/photos/upload - Photo upload started`);
+  
   try {
     if (!req.file) {
+      console.log(`[${timestamp}] ❌ POST /api/photos/upload - No file uploaded`);
       return res.status(400).json({ error: 'No photo uploaded' });
     }
 
     const { price = 5.99, category = 'other' } = req.body;
     const photoId = uuidv4();
     
+    console.log(`[${timestamp}] 📝 POST /api/photos/upload - Photo ID: ${photoId}`);
+    console.log(`[${timestamp}] 📝 POST /api/photos/upload - Price: ${price}, Category: ${category}`);
+    console.log(`[${timestamp}] 📝 POST /api/photos/upload - Original filename: ${req.file.originalname}`);
+    console.log(`[${timestamp}] 📝 POST /api/photos/upload - File size: ${req.file.size} bytes`);
+    console.log(`[${timestamp}] 📝 POST /api/photos/upload - MIME type: ${req.file.mimetype}`);
+    
     // Convert Greek filename to Greeklish to prevent corruption
     const originalFilename = req.file.originalname;
     const extension = path.extname(originalFilename);
     const baseName = path.basename(originalFilename, extension);
     const filename = convertGreekToGreeklish(originalFilename);
+
+    console.log(`[${timestamp}] 🔄 POST /api/photos/upload - Converted filename: ${filename}`);
 
     // Generate file paths
     const cleanFileName = `${photoId}-${baseName}-clean${extension}`;
@@ -401,12 +442,19 @@ app.post('/api/photos/upload', upload.single('photo'), async (req, res) => {
     const fullCleanPath = path.join(cleanDir, cleanFileName);
     const fullWatermarkedPath = path.join(watermarkedDir, watermarkedFileName);
 
+    console.log(`[${timestamp}] 💾 POST /api/photos/upload - Saving clean version: ${fullCleanPath}`);
+
     // Save clean version (original quality - no resizing or compression)
     await sharp(req.file.buffer)
       .toFile(fullCleanPath);
 
+    console.log(`[${timestamp}] ✅ POST /api/photos/upload - Clean version saved successfully`);
+
     // Create watermarked version with high quality
+    console.log(`[${timestamp}] 🎨 POST /api/photos/upload - Creating watermarked version: ${fullWatermarkedPath}`);
     await createWatermarkedImage(req.file.buffer, fullWatermarkedPath, 'Προστατευμένη Εικόνα');
+
+    console.log(`[${timestamp}] ✅ POST /api/photos/upload - Watermarked version created successfully`);
 
     // Save to database
     const photoData = {
@@ -418,7 +466,10 @@ app.post('/api/photos/upload', upload.single('photo'), async (req, res) => {
       category
     };
 
+    console.log(`[${timestamp}] 💾 POST /api/photos/upload - Saving to database:`, JSON.stringify(photoData, null, 2));
     await dbManager.addPhoto(photoData);
+
+    console.log(`[${timestamp}] ✅ POST /api/photos/upload - Photo uploaded successfully with ID: ${photoId}`);
 
     res.json({
       message: 'Photo uploaded successfully',
@@ -432,9 +483,8 @@ app.post('/api/photos/upload', upload.single('photo'), async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error uploading photo:', error);
-    console.error('Error details:', error.message);
-    console.error('Error stack:', error.stack);
+    console.error(`[${timestamp}] ❌ POST /api/photos/upload - Error:`, error.message);
+    console.error(`[${timestamp}] ❌ POST /api/photos/upload - Stack:`, error.stack);
     res.status(500).json({ error: 'Failed to upload photo', details: error.message });
   }
 });
@@ -726,10 +776,22 @@ app.delete('/api/photos/bulk', async (req, res) => {
 
 // POST /api/orders - Create new order
 app.post('/api/orders', async (req, res) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] 📋 POST /api/orders - Order creation started`);
+  
   try {
     const { photo_ids, total_amount, email, status = 'pending', mypos_order_id } = req.body;
     
+    console.log(`[${timestamp}] 📝 POST /api/orders - Order data:`, {
+      photo_ids,
+      total_amount,
+      email,
+      status,
+      mypos_order_id
+    });
+    
     if (!photo_ids || !total_amount || !email) {
+      console.log(`[${timestamp}] ❌ POST /api/orders - Missing required fields`);
       return res.status(400).json({ 
         error: 'Missing required fields: photo_ids, total_amount, email' 
       });
@@ -745,7 +807,10 @@ app.post('/api/orders', async (req, res) => {
       mypos_order_id: mypos_order_id || null
     };
 
+    console.log(`[${timestamp}] 💾 POST /api/orders - Saving order to database:`, JSON.stringify(orderData, null, 2));
     await dbManager.createOrder(orderData);
+
+    console.log(`[${timestamp}] ✅ POST /api/orders - Order created successfully with ID: ${orderId}`);
 
     res.json({
       message: 'Order created successfully',
@@ -760,7 +825,8 @@ app.post('/api/orders', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error creating order:', error);
+    console.error(`[${timestamp}] ❌ POST /api/orders - Error:`, error.message);
+    console.error(`[${timestamp}] ❌ POST /api/orders - Stack:`, error.stack);
     res.status(500).json({ error: 'Failed to create order' });
   }
 });
@@ -821,22 +887,36 @@ app.put('/api/orders/:id', async (req, res) => {
 
 // PUT /api/orders/:id/status - Update order status
 app.put('/api/orders/:id/status', async (req, res) => {
+  const timestamp = new Date().toISOString();
+  const orderId = req.params.id;
+  console.log(`[${timestamp}] 🔄 PUT /api/orders/${orderId}/status - Status update started`);
+  
   try {
     const { status, mypos_order_id } = req.body;
     
+    console.log(`[${timestamp}] 📝 PUT /api/orders/${orderId}/status - Update data:`, {
+      status,
+      mypos_order_id
+    });
+    
     if (!status) {
+      console.log(`[${timestamp}] ❌ PUT /api/orders/${orderId}/status - Status is required`);
       return res.status(400).json({ error: 'Status is required' });
     }
 
-    const result = await dbManager.updateOrderStatus(req.params.id, status, mypos_order_id);
+    console.log(`[${timestamp}] 💾 PUT /api/orders/${orderId}/status - Updating order status in database`);
+    const result = await dbManager.updateOrderStatus(orderId, status, mypos_order_id);
     
     if (result === 0) {
+      console.log(`[${timestamp}] ❌ PUT /api/orders/${orderId}/status - Order not found`);
       return res.status(404).json({ error: 'Order not found' });
     }
 
+    console.log(`[${timestamp}] ✅ PUT /api/orders/${orderId}/status - Order status updated successfully`);
     res.json({ message: 'Order status updated successfully' });
   } catch (error) {
-    console.error('Error updating order status:', error);
+    console.error(`[${timestamp}] ❌ PUT /api/orders/${orderId}/status - Error:`, error.message);
+    console.error(`[${timestamp}] ❌ PUT /api/orders/${orderId}/status - Stack:`, error.stack);
     res.status(500).json({ error: 'Failed to update order status' });
   }
 });
@@ -861,13 +941,22 @@ app.delete('/api/orders/:id', async (req, res) => {
 
 // POST /mypos/sign - Υπογραφή παραμέτρων πληρωμής (frontend → POST εδώ με paymentParams)
 app.post("/mypos/sign", (req, res) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] 🔐 myPOS Sign Request Started`);
+  
   try {
     if (!MYPOS_PRIVATE_KEY_PEM) {
+      console.error(`[${timestamp}] ❌ myPOS Sign Failed: Private key not configured`);
       return res.status(500).json({ error: "myPOS private key not configured" });
     }
 
+    console.log(`[${timestamp}] 📝 myPOS Sign - Input Parameters:`, JSON.stringify(req.body, null, 2));
+
     const canonical = buildCanonical(req.body || {});
+    console.log(`[${timestamp}] 🔗 myPOS Sign - Canonical String:`, canonical);
+
     const keyObj = makeKeyObjectFromEnv();
+    console.log(`[${timestamp}] 🔑 myPOS Sign - Key Object Created Successfully`);
 
     const signature = crypto.sign(
       "RSA-SHA256",
@@ -875,39 +964,54 @@ app.post("/mypos/sign", (req, res) => {
       keyObj
     );
 
-    return res.json({ signature: signature.toString("base64") });
+    const signatureBase64 = signature.toString("base64");
+    console.log(`[${timestamp}] ✅ myPOS Sign - Signature Generated:`, signatureBase64.substring(0, 50) + "...");
+
+    return res.json({ signature: signatureBase64 });
   } catch (err) {
-    console.error("myPOS sign error:", err);
+    console.error(`[${timestamp}] ❌ myPOS Sign Error:`, err.message);
+    console.error(`[${timestamp}] ❌ myPOS Sign Error Stack:`, err.stack);
     return res.status(500).json({ error: "sign_failed" });
   }
 });
 
 // POST /mypos/notify - myPOS notify (προαιρετικό verify της υπογραφής του notify)
 app.post("/mypos/notify", (req, res) => {
-  try {
-    console.log("🔔 myPOS notify payload:", req.body);
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] 🔔 myPOS Notify Request Started`);
+  console.log(`[${timestamp}] 📨 myPOS Notify - Full Payload:`, JSON.stringify(req.body, null, 2));
 
+  try {
     const certPem = normalizePem(MYPOS_PUBLIC_CERT_PEM);
+    console.log(`[${timestamp}] 🔐 myPOS Notify - Certificate PEM Available:`, !!certPem);
 
     if (certPem && req.body && req.body.signature) {
       const { signature, ...rest } = req.body;
+      console.log(`[${timestamp}] 🔍 myPOS Notify - Signature to Verify:`, signature.substring(0, 50) + "...");
+      console.log(`[${timestamp}] 📋 myPOS Notify - Data to Verify:`, JSON.stringify(rest, null, 2));
+
       const canonical = buildCanonical(rest);
+      console.log(`[${timestamp}] 🔗 myPOS Notify - Canonical String:`, canonical);
 
       const verifier = crypto.createVerify("RSA-SHA256");
       verifier.update(Buffer.from(canonical, "utf8"));
       const isValid = verifier.verify(certPem, signature, "base64");
 
       if (!isValid) {
-        console.warn("⚠️ notify signature INVALID");
+        console.warn(`[${timestamp}] ⚠️ myPOS Notify - Signature INVALID`);
       } else {
-        console.log("✅ notify signature OK");
+        console.log(`[${timestamp}] ✅ myPOS Notify - Signature VERIFIED SUCCESSFULLY`);
       }
+    } else {
+      console.log(`[${timestamp}] ℹ️ myPOS Notify - No signature verification (cert or signature missing)`);
     }
 
+    console.log(`[${timestamp}] ✅ myPOS Notify - Responding with 200 OK`);
     // Η myPOS περιμένει 200/OK
     return res.status(200).send("OK");
   } catch (err) {
-    console.error("myPOS notify error:", err);
+    console.error(`[${timestamp}] ❌ myPOS Notify Error:`, err.message);
+    console.error(`[${timestamp}] ❌ myPOS Notify Error Stack:`, err.stack);
     // Επιστρέφουμε 200 ώστε να μη γίνεται retry αέναα
     return res.status(200).send("OK");
   }
@@ -956,31 +1060,73 @@ app.get('/api/stats', async (req, res) => {
 
 // Error handling middleware
 app.use((error, req, res, next) => {
-  console.error('Unhandled error:', error);
+  const timestamp = new Date().toISOString();
+  console.error(`[${timestamp}] ❌ UNHANDLED ERROR:`, error.message);
+  console.error(`[${timestamp}] ❌ UNHANDLED ERROR STACK:`, error.stack);
+  console.error(`[${timestamp}] ❌ UNHANDLED ERROR REQUEST:`, {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    body: req.body
+  });
   res.status(500).json({ error: 'Internal server error' });
 });
 
 // 404 handler
 app.use('*', (req, res) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] ❌ 404 NOT FOUND: ${req.method} ${req.url}`);
   res.status(404).json({ error: 'Endpoint not found' });
 });
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`API available at http://localhost:${PORT}/api`);
-  console.log(`Uploads available at http://localhost:${PORT}/uploads`);
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] 🚀 SERVER STARTED`);
+  console.log(`[${timestamp}] 🌐 Server running on port ${PORT}`);
+  console.log(`[${timestamp}] 🔗 API available at http://localhost:${PORT}/api`);
+  console.log(`[${timestamp}] 📁 Uploads available at http://localhost:${PORT}/uploads`);
+  console.log(`[${timestamp}] 🧪 Test interface available at http://localhost:${PORT}/test.html`);
+  console.log(`[${timestamp}] 💳 myPOS Sign endpoint: http://localhost:${PORT}/mypos/sign`);
+  console.log(`[${timestamp}] 🔔 myPOS Notify endpoint: http://localhost:${PORT}/mypos/notify`);
+  console.log(`[${timestamp}] 🏥 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`[${timestamp}] 📊 Stats endpoint: http://localhost:${PORT}/api/stats`);
+  console.log(`[${timestamp}] 🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`[${timestamp}] 🔐 myPOS Private Key: ${MYPOS_PRIVATE_KEY_PEM ? '✅ Configured' : '❌ Not configured'}`);
+  console.log(`[${timestamp}] 🔐 myPOS Public Cert: ${MYPOS_PUBLIC_CERT_PEM ? '✅ Configured' : '❌ Not configured'}`);
+  console.log(`[${timestamp}] 🌍 Allowed Origin: ${ALLOWED_ORIGIN || 'All origins allowed'}`);
 });
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
-  console.log('\nShutting down gracefully...');
+  const timestamp = new Date().toISOString();
+  console.log(`\n[${timestamp}] 🛑 SIGINT received - Shutting down gracefully...`);
   await dbManager.close();
+  console.log(`[${timestamp}] ✅ Database connection closed`);
+  console.log(`[${timestamp}] 👋 Server shutdown complete`);
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  console.log('\nShutting down gracefully...');
+  const timestamp = new Date().toISOString();
+  console.log(`\n[${timestamp}] 🛑 SIGTERM received - Shutting down gracefully...`);
   await dbManager.close();
+  console.log(`[${timestamp}] ✅ Database connection closed`);
+  console.log(`[${timestamp}] 👋 Server shutdown complete`);
   process.exit(0);
+});
+
+// Log uncaught exceptions
+process.on('uncaughtException', (error) => {
+  const timestamp = new Date().toISOString();
+  console.error(`[${timestamp}] ❌ UNCAUGHT EXCEPTION:`, error.message);
+  console.error(`[${timestamp}] ❌ UNCAUGHT EXCEPTION STACK:`, error.stack);
+  process.exit(1);
+});
+
+// Log unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  const timestamp = new Date().toISOString();
+  console.error(`[${timestamp}] ❌ UNHANDLED REJECTION at:`, promise, 'reason:', reason);
+  process.exit(1);
 });
