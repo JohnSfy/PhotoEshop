@@ -5,18 +5,39 @@ const path = require('path');
 const fs = require('fs-extra');
 const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const DatabaseManager = require('./database/dbManager');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
+// myPOS environment variables
+const {
+  ALLOWED_ORIGIN = "http://localhost:5173",
+  MYPOS_PRIVATE_KEY_PEM,
+  MYPOS_PUBLIC_CERT_PEM,
+} = process.env;
+
+// Validate myPOS private key if provided
+if (MYPOS_PRIVATE_KEY_PEM) {
+  try {
+    // Basic validation - will be done in helper function
+    console.log('myPOS private key found in environment');
+  } catch (error) {
+    console.error('❌ Invalid MYPOS_PRIVATE_KEY_PEM in .env:', error.message);
+  }
+}
+
 // Initialize database
 const dbManager = new DatabaseManager();
 
 // Middleware
-app.use(cors({ origin: true, credentials: false }));
+app.set("trust proxy", true);
+// myPOS notify έρχεται ως application/x-www-form-urlencoded
+app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
+app.use(cors({ origin: ALLOWED_ORIGIN || true, credentials: false }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Serve test.html for testing the API
@@ -112,6 +133,65 @@ function convertGreekToGreeklish(text) {
     .replace(/^_|_$/g, '');         // Remove leading/trailing underscores
   
   return result || `photo_${Date.now()}`;
+}
+
+// ==================== myPOS HELPER FUNCTIONS ====================
+
+// Γυρίζει "\\n" σε πραγματικά newlines και καθαρίζει CR/LF
+function normalizePem(raw) {
+  return (raw || "")
+    .replace(/\\n/g, "\n")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
+}
+
+// Επαλήθευση ότι το env περιέχει ΟΝΤΩΣ PRIVATE KEY (και όχι CERT)
+function validatePrivateKeyPem(pem) {
+  const hasPrivate = /^-----BEGIN (RSA )?PRIVATE KEY-----$/m.test(pem);
+  const hasCert = /^-----BEGIN CERTIFICATE-----$/m.test(pem);
+  if (!hasPrivate) {
+    throw new Error(
+      "MYPOS_PRIVATE_KEY_PEM: missing PRIVATE KEY block (check .env value)"
+    );
+  }
+  if (hasCert) {
+    throw new Error(
+      "MYPOS_PRIVATE_KEY_PEM contains a CERTIFICATE block — put only the PRIVATE KEY here"
+    );
+  }
+}
+
+// Δημιουργεί KeyObject με σωστό type (pkcs1 vs pkcs8) από το .env
+function makeKeyObjectFromEnv() {
+  const pem = normalizePem(MYPOS_PRIVATE_KEY_PEM);
+  validatePrivateKeyPem(pem);
+  const isPkcs1 = /^-----BEGIN RSA PRIVATE KEY-----$/m.test(pem);
+  return crypto.createPrivateKey({
+    key: pem,
+    format: "pem",
+    type: isPkcs1 ? "pkcs1" : "pkcs8",
+  });
+}
+
+// Σταθερή μετατροπή αντικειμένων/arrays σε string για υπογραφή
+function stableStringify(v) {
+  if (v === null || typeof v !== "object") return String(v);
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`;
+  // object: sort keys for determinism
+  return `{${Object.keys(v)
+    .sort()
+    .map((k) => `${k}:${stableStringify(v[k])}`)
+    .join(",")}}`;
+}
+
+// Χτίζει canonical string: ταξινόμηση keys αλφαβητικά, χωρίς το "signature"
+function buildCanonical(params) {
+  return Object.entries(params || {})
+    .filter(([k]) => k.toLowerCase() !== "signature")
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}=${stableStringify(v)}`)
+    .join("&");
 }
 
 // Function to create watermarked image with diagonal repeating watermarks
@@ -774,6 +854,62 @@ app.delete('/api/orders/:id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting order:', error);
     res.status(500).json({ error: 'Failed to delete order' });
+  }
+});
+
+// ==================== myPOS PAYMENT APIs ====================
+
+// POST /mypos/sign - Υπογραφή παραμέτρων πληρωμής (frontend → POST εδώ με paymentParams)
+app.post("/mypos/sign", (req, res) => {
+  try {
+    if (!MYPOS_PRIVATE_KEY_PEM) {
+      return res.status(500).json({ error: "myPOS private key not configured" });
+    }
+
+    const canonical = buildCanonical(req.body || {});
+    const keyObj = makeKeyObjectFromEnv();
+
+    const signature = crypto.sign(
+      "RSA-SHA256",
+      Buffer.from(canonical, "utf8"),
+      keyObj
+    );
+
+    return res.json({ signature: signature.toString("base64") });
+  } catch (err) {
+    console.error("myPOS sign error:", err);
+    return res.status(500).json({ error: "sign_failed" });
+  }
+});
+
+// POST /mypos/notify - myPOS notify (προαιρετικό verify της υπογραφής του notify)
+app.post("/mypos/notify", (req, res) => {
+  try {
+    console.log("🔔 myPOS notify payload:", req.body);
+
+    const certPem = normalizePem(MYPOS_PUBLIC_CERT_PEM);
+
+    if (certPem && req.body && req.body.signature) {
+      const { signature, ...rest } = req.body;
+      const canonical = buildCanonical(rest);
+
+      const verifier = crypto.createVerify("RSA-SHA256");
+      verifier.update(Buffer.from(canonical, "utf8"));
+      const isValid = verifier.verify(certPem, signature, "base64");
+
+      if (!isValid) {
+        console.warn("⚠️ notify signature INVALID");
+      } else {
+        console.log("✅ notify signature OK");
+      }
+    }
+
+    // Η myPOS περιμένει 200/OK
+    return res.status(200).send("OK");
+  } catch (err) {
+    console.error("myPOS notify error:", err);
+    // Επιστρέφουμε 200 ώστε να μη γίνεται retry αέναα
+    return res.status(200).send("OK");
   }
 });
 

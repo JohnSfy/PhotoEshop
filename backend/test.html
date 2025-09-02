@@ -48,6 +48,7 @@
         .delete-btn { background: linear-gradient(135deg, #f44336 0%, #da190b 100%); }
         .order-btn { background: linear-gradient(135deg, #2196F3 0%, #0b7dda 100%); }
         .category-btn { background: linear-gradient(135deg, #ff9800 0%, #e68900 100%); }
+        .mypos-btn { background: linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%); }
         .form-section {
             background: #f9f9f9;
             padding: 20px;
@@ -131,6 +132,37 @@
             padding: 10px 15px;
             font-size: 14px;
         }
+        .form-container {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .form-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .button.secondary {
+            background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
+        }
     </style>
 </head>
 <body>
@@ -146,6 +178,8 @@
             <button class="button update-order-btn" onclick="showUpdateOrderForm()">✏️ Update Order</button>
             <button class="button category-btn" onclick="showCategoryForm()">🏷️ Create Category</button>
             <button class="button delete-category-btn" onclick="showDeleteCategoryForm()">❌ Delete Category</button>
+            <button class="button mypos-btn" onclick="showMyposSignForm()">💳 myPOS Sign</button>
+            <button class="button mypos-btn" onclick="showMyposNotifyForm()">🔔 myPOS Notify</button>
         </div>
 
         <!-- Upload Photo Form -->
@@ -306,6 +340,58 @@
             <button class="button delete-btn" onclick="deleteCategory()">Delete Category</button>
         </div>
 
+        <!-- myPOS Sign Form -->
+        <div id="myposSignForm" style="display: none;" class="form-section">
+            <h3>💳 myPOS Sign Payment Parameters</h3>
+            <div class="input-group">
+                <label for="myposAmount">Amount:</label>
+                <input type="number" id="myposAmount" step="0.01" value="29.99" placeholder="29.99">
+            </div>
+            <div class="input-group">
+                <label for="myposOrderId">Order ID:</label>
+                <input type="text" id="myposOrderId" placeholder="ORDER123456">
+            </div>
+            <div class="input-group">
+                <label for="myposCurrency">Currency:</label>
+                <input type="text" id="myposCurrency" value="EUR" placeholder="EUR">
+            </div>
+            <div class="input-group">
+                <label for="myposDescription">Description:</label>
+                <input type="text" id="myposDescription" placeholder="Photo purchase" value="Photo purchase">
+            </div>
+            <div class="input-group">
+                <label for="myposCustomerEmail">Customer Email:</label>
+                <input type="email" id="myposCustomerEmail" placeholder="customer@example.com">
+            </div>
+            <button class="button mypos-btn" onclick="testMyposSign()">Sign Payment Parameters</button>
+        </div>
+
+        <!-- myPOS Notify Form -->
+        <div id="myposNotifyForm" style="display: none;" class="form-section">
+            <h3>🔔 myPOS Notify Test</h3>
+            <div class="input-group">
+                <label for="notifyOrderId">Order ID:</label>
+                <input type="text" id="notifyOrderId" placeholder="ORDER123456">
+            </div>
+            <div class="input-group">
+                <label for="notifyStatus">Status:</label>
+                <select id="notifyStatus">
+                    <option value="success">Success</option>
+                    <option value="failed">Failed</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label for="notifyAmount">Amount:</label>
+                <input type="number" id="notifyAmount" step="0.01" value="29.99" placeholder="29.99">
+            </div>
+            <div class="input-group">
+                <label for="notifySignature">Signature (optional):</label>
+                <input type="text" id="notifySignature" placeholder="base64-signature-here">
+            </div>
+            <button class="button mypos-btn" onclick="testMyposNotify()">Send Notify Test</button>
+        </div>
+
         <div id="results" class="results" style="display: none;">
             <h3>📊 Results</h3>
             <div id="status"></div>
@@ -319,11 +405,14 @@
             <button class="button" onclick="testPhotos()">Get Photos</button>
             <button class="button" onclick="testOrders()">Get Orders</button>
             <button class="button" onclick="testStats()">Get Stats</button>
+            <button class="button mypos-btn" onclick="testMyposSignQuick()">myPOS Sign Quick</button>
+            <button class="button mypos-btn" onclick="testMyposNotifyQuick()">myPOS Notify Quick</button>
         </div>
     </div>
 
     <script>
         const API_BASE = 'https://image-buy-app-backend.onrender.com/api';
+        const MYPOS_BASE = 'https://image-buy-app-backend.onrender.com';
 
         function showUploadForm() {
             hideAllForms();
@@ -365,6 +454,16 @@
             document.getElementById('deleteCategoryForm').style.display = 'block';
         }
 
+        function showMyposSignForm() {
+            hideAllForms();
+            document.getElementById('myposSignForm').style.display = 'block';
+        }
+
+        function showMyposNotifyForm() {
+            hideAllForms();
+            document.getElementById('myposNotifyForm').style.display = 'block';
+        }
+
         function hideOrderForm() {
             document.getElementById('orderForm').style.display = 'none';
         }
@@ -374,7 +473,7 @@
         }
 
         function hideAllForms() {
-            const forms = ['uploadForm', 'uploadMultipleForm', 'deleteForm', 'bulkDeleteForm', 'orderForm', 'updateOrderForm', 'categoryForm', 'deleteCategoryForm'];
+            const forms = ['uploadForm', 'uploadMultipleForm', 'deleteForm', 'bulkDeleteForm', 'orderForm', 'updateOrderForm', 'categoryForm', 'deleteCategoryForm', 'myposSignForm', 'myposNotifyForm'];
             forms.forEach(form => {
                 document.getElementById(form).style.display = 'none';
             });
@@ -671,6 +770,153 @@
                 }
             } catch (error) {
                 showResult('Category deletion error: ' + error.message, 'error');
+            }
+        }
+
+        // myPOS Testing Functions
+        async function testMyposSign() {
+            const amount = document.getElementById('myposAmount').value;
+            const orderId = document.getElementById('myposOrderId').value;
+            const currency = document.getElementById('myposCurrency').value;
+            const description = document.getElementById('myposDescription').value;
+            const customerEmail = document.getElementById('myposCustomerEmail').value;
+
+            if (!amount || !orderId || !currency) {
+                showResult('Please fill in amount, order ID, and currency', 'error');
+                return;
+            }
+
+            const paymentParams = {
+                amount: parseFloat(amount),
+                orderId: orderId,
+                currency: currency,
+                description: description || 'Photo purchase',
+                customerEmail: customerEmail || '',
+                timestamp: Date.now()
+            };
+
+            try {
+                const response = await fetch(`${MYPOS_BASE}/mypos/sign`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(paymentParams)
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResult('myPOS signature generated successfully!', 'success', result);
+                } else {
+                    showResult('myPOS sign failed', 'error', result);
+                }
+            } catch (error) {
+                showResult('myPOS sign error: ' + error.message, 'error');
+            }
+        }
+
+        async function testMyposNotify() {
+            const orderId = document.getElementById('notifyOrderId').value;
+            const status = document.getElementById('notifyStatus').value;
+            const amount = document.getElementById('notifyAmount').value;
+            const signature = document.getElementById('notifySignature').value;
+
+            if (!orderId || !status || !amount) {
+                showResult('Please fill in order ID, status, and amount', 'error');
+                return;
+            }
+
+            const notifyData = {
+                orderId: orderId,
+                status: status,
+                amount: parseFloat(amount),
+                timestamp: Date.now()
+            };
+
+            if (signature) {
+                notifyData.signature = signature;
+            }
+
+            try {
+                const response = await fetch(`${MYPOS_BASE}/mypos/notify`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: new URLSearchParams(notifyData)
+                });
+
+                const result = await response.text();
+                
+                if (response.ok) {
+                    showResult('myPOS notify sent successfully!', 'success', { response: result, data: notifyData });
+                } else {
+                    showResult('myPOS notify failed', 'error', { response: result, data: notifyData });
+                }
+            } catch (error) {
+                showResult('myPOS notify error: ' + error.message, 'error');
+            }
+        }
+
+        // Quick myPOS Test Functions
+        async function testMyposSignQuick() {
+            const quickParams = {
+                amount: 19.99,
+                orderId: 'QUICK_TEST_' + Date.now(),
+                currency: 'EUR',
+                description: 'Quick test payment',
+                customerEmail: 'test@example.com',
+                timestamp: Date.now()
+            };
+
+            try {
+                const response = await fetch(`${MYPOS_BASE}/mypos/sign`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(quickParams)
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResult('Quick myPOS sign test completed!', 'success', result);
+                } else {
+                    showResult('Quick myPOS sign test failed', 'error', result);
+                }
+            } catch (error) {
+                showResult('Quick myPOS sign test error: ' + error.message, 'error');
+            }
+        }
+
+        async function testMyposNotifyQuick() {
+            const quickNotifyData = {
+                orderId: 'QUICK_NOTIFY_' + Date.now(),
+                status: 'success',
+                amount: 19.99,
+                timestamp: Date.now()
+            };
+
+            try {
+                const response = await fetch(`${MYPOS_BASE}/mypos/notify`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: new URLSearchParams(quickNotifyData)
+                });
+
+                const result = await response.text();
+                
+                if (response.ok) {
+                    showResult('Quick myPOS notify test completed!', 'success', { response: result, data: quickNotifyData });
+                } else {
+                    showResult('Quick myPOS notify test failed', 'error', { response: result, data: quickNotifyData });
+                }
+            } catch (error) {
+                showResult('Quick myPOS notify test error: ' + error.message, 'error');
             }
         }
 
