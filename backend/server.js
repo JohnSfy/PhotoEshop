@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 10000;
 
 // myPOS environment variables
 const {
-  ALLOWED_ORIGIN = "http://localhost:5173",
+  ALLOWED_ORIGIN = "http://localhost:5173,https://photoeshop-1.onrender.com",
   MYPOS_PRIVATE_KEY_PEM,
   MYPOS_PUBLIC_CERT_PEM,
 } = process.env;
@@ -61,7 +61,10 @@ app.use((req, res, next) => {
 // myPOS notify έρχεται ως application/x-www-form-urlencoded
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
-app.use(cors({ origin: ALLOWED_ORIGIN || true, credentials: false }));
+// Parse allowed origins from environment variable
+const allowedOrigins = ALLOWED_ORIGIN ? ALLOWED_ORIGIN.split(',').map(origin => origin.trim()) : true;
+
+app.use(cors({ origin: allowedOrigins, credentials: false }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Serve test.html for testing the API
