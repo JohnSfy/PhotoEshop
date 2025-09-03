@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 10000;
 
 // myPOS environment variables
 const {
-  ALLOWED_ORIGIN = "http://localhost:5173,https://photoeshop-1.onrender.com",
+  ALLOWED_ORIGIN = "http://localhost:5173,https://photoeshop-1.onrender.com,https://image-buy-app-backend.onrender.com",
   MYPOS_PRIVATE_KEY_PEM,
   MYPOS_PUBLIC_CERT_PEM,
 } = process.env;
@@ -64,7 +64,37 @@ app.use(express.json());
 // Parse allowed origins from environment variable
 const allowedOrigins = ALLOWED_ORIGIN ? ALLOWED_ORIGIN.split(',').map(origin => origin.trim()) : true;
 
-app.use(cors({ origin: allowedOrigins, credentials: false }));
+// Enhanced CORS configuration
+app.use(cors({ 
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // If allowedOrigins is true (all origins allowed), allow all
+    if (allowedOrigins === true) return callback(null, true);
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      return callback(null, true);
+    }
+    
+    // For development, also allow any localhost origin
+    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+      return callback(null, true);
+    }
+    
+    // For production, allow any onrender.com subdomain
+    if (origin.includes('onrender.com')) {
+      return callback(null, true);
+    }
+    
+    const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+    return callback(new Error(msg), false);
+  },
+  credentials: false,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Serve test.html for testing the API
